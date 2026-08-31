@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  boolean,
   char,
   date,
   index,
@@ -22,6 +23,14 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   baseCurrency: char("base_currency", { length: 3 }).notNull().default("EUR"),
+  /**
+   * Whether the person has actually picked a currency, as opposed to being given
+   * the default. False means the app asks before letting anything be entered —
+   * the seeded amounts are plain numbers, and what they are numbers *of* is the
+   * first thing worth establishing. The seed script resets it, so a fresh demo
+   * always starts with the question.
+   */
+  baseCurrencyChosen: boolean("base_currency_chosen").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

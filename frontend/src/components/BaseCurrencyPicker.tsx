@@ -1,38 +1,26 @@
-import type { BaseCurrencyChange } from "../api";
+import { currencyLabel } from "./CurrencyChoice";
 
 /**
- * A short list rather than all twelve supported currencies.
+ * Change the currency every total is reported in, after the first visit.
  *
- * The dropdown next to a heading is a glance-and-move-on control, and twelve
- * options is a menu you have to read. These are the ones a demo is plausibly
- * reported in; an expense can still be *entered* in any of the twelve, which is
- * a different question and keeps its full list.
- */
-export const COMMON_BASE_CURRENCIES = ["EUR", "GBP", "USD", "SEK", "CHF"] as const;
-
-/**
- * Choose the currency every total on the page is reported in.
+ * The note underneath is short now because the behaviour became simple: this
+ * changes the symbol and nothing else. No stored figure moves, so switching to
+ * another currency and back leaves the database exactly as it was.
  *
- * The note underneath is not decoration. Switching the base does two different
- * things to two kinds of row, and one of them is surprising enough that leaving
- * it unsaid would look like a bug:
- *
- * - an expense recorded in the old base keeps its number and is simply read as
- *   the new currency — 42 stays 42
- * - an expense recorded in some other currency is converted again, at the rate
- *   for the day it was spent
- *
- * So this relabels rather than migrates, and says so.
+ * It said something much longer when switching used to recompute foreign rows
+ * and relabel the rest. That version worked, but a round trip lost information,
+ * and an interface needing a paragraph to explain what a dropdown does is a
+ * fair sign the dropdown is doing too much.
  */
 export function BaseCurrencyPicker({
   value,
+  currencies,
   saving,
-  lastChange,
   onChange,
 }: {
   value: string;
+  currencies: string[];
   saving: boolean;
-  lastChange: BaseCurrencyChange | null;
   onChange: (currency: string) => void;
 }) {
   return (
@@ -43,22 +31,18 @@ export function BaseCurrencyPicker({
           value={value}
           disabled={saving}
           onChange={(event) => onChange(event.target.value)}
-          className="rounded-lg bg-white px-3 py-1.5 text-sm text-slate-900 ring-1 ring-slate-200 outline-none transition focus:ring-2 focus:ring-accent disabled:opacity-50"
+          className="max-w-[10rem] rounded-lg bg-white px-3 py-1.5 text-sm text-slate-900 ring-1 ring-slate-200 outline-none transition focus:ring-2 focus:ring-accent disabled:opacity-50"
         >
-          {COMMON_BASE_CURRENCIES.map((code) => (
-            <option key={code} value={code}>
+          {currencies.map((code) => (
+            <option key={code} value={code} title={currencyLabel(code)}>
               {code}
             </option>
           ))}
         </select>
       </label>
 
-      <p className="mt-1 max-w-xs text-xs text-slate-400">
-        {saving
-          ? "Reworking your totals..."
-          : lastChange
-            ? `${lastChange.relabelled} ${lastChange.relabelled === 1 ? "expense kept its" : "expenses kept their"} number and now read as ${lastChange.baseCurrency}. ${lastChange.recomputed} in another currency ${lastChange.recomputed === 1 ? "was" : "were"} converted again.`
-            : "Relabels amounts already in this currency; converts the rest."}
+      <p className="mt-1 text-xs text-slate-400">
+        {saving ? "Saving..." : "Changes the symbol only. No amount is altered."}
       </p>
     </div>
   );

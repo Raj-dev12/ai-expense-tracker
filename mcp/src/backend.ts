@@ -14,17 +14,14 @@ import { z } from "zod";
 const BACKEND_URL = (process.env.BACKEND_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export const CATEGORY_NAMES = [
-  "Groceries",
-  "Restaurants",
-  "Transport",
-  "Shopping",
-  "Bills",
-  "Entertainment",
-  "Health",
-  "Travel",
-  "Other",
-] as const;
+/**
+ * There is no copy of the category list here any more.
+ *
+ * It used to be nine names hardcoded in this file, which meant an assistant
+ * could be offered a category the server had stopped recognising, or be kept
+ * from one it had just gained. currentCategories() below asks the API instead,
+ * on every call, the same way baseCurrency() does.
+ */
 
 export const CURRENCIES = [
   "EUR", "USD", "GBP", "CHF", "SEK", "NOK", "DKK", "PLN", "CZK", "JPY", "CAD", "AUD",
@@ -76,9 +73,14 @@ export const summarySchema = z.object({
 
 export const deletedSchema = z.object({ deleted: expenseSchema });
 
+export const categoriesSchema = z.object({ categories: z.array(z.string()) });
+
 export const settingsSchema = z.object({
   baseCurrency: z.string(),
-  supportedCurrencies: z.array(z.string()),
+  baseCurrencyChosen: z.boolean(),
+  conversionEnabled: z.boolean(),
+  currencies: z.array(z.string()),
+  convertibleCurrencies: z.array(z.string()),
 });
 
 export type Expense = z.infer<typeof expenseSchema>;
@@ -182,6 +184,36 @@ export function today(): string {
  */
 export async function baseCurrency(): Promise<string> {
   return (await call("/api/settings", settingsSchema)).baseCurrency;
+}
+
+/**
+ * The categories that currently exist, asked for on every call.
+ *
+ * The same reasoning as baseCurrency above: this is a list that can change while
+ * an assistant is mid-conversation, and a cached copy would have it confidently
+ * filing expenses under something that no longer exists — or refusing to use one
+ * that was added a minute ago. The extra request is cheap beside the one the
+ * tool is already making.
+ */
+export async function currentCategories(): Promise<string[]> {
+  return (await call("/api/categories", categoriesSchema)).categories;
+}
+
+/**
+ * Match what an assistant sent against what actually exists.
+ *
+ * Case-insensitive, because "groceries" is obviously the same choice as
+ * "Groceries" and refusing it would be pedantry rather than validation. The
+ * stored spelling is what comes back, so the API only ever receives the exact
+ * name it knows.
+ *
+ * Returns null when there is no match, and the caller turns that into an error
+ * naming every category that does exist — which is how a static tool schema can
+ * still offer an assistant a live list.
+ */
+export function matchCategory(given: string, available: string[]): string | null {
+  const needle = given.trim().toLowerCase();
+  return available.find((name) => name.toLowerCase() === needle) ?? null;
 }
 
 /** An amount written the way a person reads it, in whatever the base is. */

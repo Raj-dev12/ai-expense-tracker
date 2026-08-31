@@ -15,6 +15,13 @@
       "when": 1788184134704,
       "tag": "0001_rename_amount_eur",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788186141824,
+      "tag": "0002_base_currency_chosen",
+      "breakpoints": true
     }
   ]
 }

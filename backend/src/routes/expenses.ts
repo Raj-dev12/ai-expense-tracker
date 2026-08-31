@@ -2,7 +2,7 @@ import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses, type ExpenseRow } from "../db/schema.js";
-import { baseFigureFor } from "../lib/figures.js";
+import { storedAmountFor } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { toMoneyString } from "../lib/money.js";
 import { getDemoUser } from "../lib/user.js";
@@ -64,8 +64,10 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       throw new HttpError(429, "This demo has reached its expense limit");
     }
 
-    // Converted at the rate from the day it was spent, not today.
-    const amountBase = await baseFigureFor(
+    // With conversion off this simply stores what was typed, in the base
+    // currency. With it on, the amount is converted at the rate from the day it
+    // was spent. Either way the decision lives in one function.
+    const stored = await storedAmountFor(
       input.amount,
       input.currency,
       input.expenseDate,
@@ -77,8 +79,8 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       .values({
         userId,
         amount: toMoneyString(input.amount),
-        currency: input.currency,
-        amountBase,
+        currency: stored.currency,
+        amountBase: stored.amountBase,
         merchant: input.merchant ?? null,
         category: input.category,
         description: input.description ?? null,
@@ -191,7 +193,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     if ("description" in patch) changes.description = patch.description ?? null;
 
     /**
-     * The euro figure is derived, so it cannot be left behind.
+     * The base figure is derived, so it cannot be left behind.
      *
      * It depends on three things: the amount, the currency, and the day — the
      * rate used is the one from the day the money was spent. Change any of them
@@ -215,7 +217,12 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       const currency = patch.currency ?? existing.currency;
       const expenseDate = patch.expenseDate ?? existing.expenseDate;
 
-      changes.amountBase = await baseFigureFor(amount, currency, expenseDate, baseCurrency);
+      const stored = await storedAmountFor(amount, currency, expenseDate, baseCurrency);
+      // With conversion off the currency is forced back to the base, so an edit
+      // cannot smuggle in a foreign currency the rest of the app would then have
+      // no way to convert.
+      changes.currency = stored.currency;
+      changes.amountBase = stored.amountBase;
     }
 
     const [updated] = await db

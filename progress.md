@@ -86,8 +86,18 @@ Asked for after the build plan was written, and built on request rather than sug
 - [x] `update_expense` MCP tool, so an assistant can correct a row it added
 - [x] Verified: 67 backend tests, all render checks, all seven MCP tools over stdio
 - [x] Base currency is a setting, not a hardcoded EUR: `users.base_currency` is finally read,
-      `amount_eur` renamed to `amount_base` throughout, a picker at the top right, and a
-      `PATCH /api/settings` that relabels rows already in the old base and recomputes the rest
+      `amount_eur` renamed to `amount_base` throughout, and a picker at the top right
+- [x] Superseded that: switching currency now changes the symbol and nothing else, so a
+      round trip is lossless. Conversion moved behind `FX_CONVERSION`, off by default, with
+      every part of it kept — live rates, the cache, the business-day fallback, the fixed table
+- [x] Seed data is plain numbers: the four foreign-currency rows are gone, 93 expenses
+- [x] Currency is chosen on first visit, before anything can be entered, from all 162 ISO 4217
+      codes, and remembered on the user so it is asked once
+- [x] `GET /api/categories` reads the categories table, which the seed had been writing and
+      nothing had ever read
+- [x] MCP tools hold no category list of their own: read fresh on every call, matched
+      case-insensitively, and an unknown one is answered with the list that does exist. The
+      backend Zod enum is still what enforces it
 
 ## Finishing
 

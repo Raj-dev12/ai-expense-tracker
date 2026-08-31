@@ -1,7 +1,8 @@
 import { and, count, desc, eq, gte, lte, sum } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { convertToBase } from "../fx/rates.js";
+import { CONVERTIBLE_CURRENCIES, convertToBase, isConversionEnabled } from "../fx/rates.js";
 import { expenses } from "../db/schema.js";
+import { HttpError } from "./http-error.js";
 import { toMoneyString } from "./money.js";
 import {
   addDays,
@@ -34,26 +35,49 @@ export function money(value: string | null): string {
   return value ?? "0.00";
 }
 
+export type StoredAmount = {
+  /** The currency actually written to the row. */
+  currency: string;
+  /** The figure written to `amount_base`. */
+  amountBase: string;
+};
+
 /**
- * What the stored base figure for one row should be.
+ * What a row should actually store, in either mode.
  *
- * The single definition of a derived column. It is used when an expense is
- * created, when a PATCH moves the amount, the currency or the date, and when the
- * base currency itself changes — three callers that must agree, because they are
- * all answering the same question: given this amount, in this currency, spent on
- * this day, what is it worth in the base currency?
+ * The single place that knows the difference, used by create and by patch.
  *
- * The rate used is the one from the day it was spent, never today's. An expense
- * from three weeks ago converted at today's rate is quietly wrong.
+ * **Conversion off (the default).** There is one currency and it is the base. A
+ * currency named in a sentence is ignored rather than refused, so "30 quid" with
+ * a euro base records 30 euros — the number a person typed is the number that is
+ * stored. Nothing is derived, which is what makes changing the base afterwards a
+ * change of symbol and nothing more.
+ *
+ * **Conversion on.** The amount is converted at the rate from the day it was
+ * spent, never today's, and both figures are kept. The currency has to be one
+ * the rate table covers, because an amount that cannot be converted has no base
+ * figure to store.
  */
-export async function baseFigureFor(
+export async function storedAmountFor(
   amount: number | string,
-  currency: string,
+  requestedCurrency: string,
   expenseDate: string,
   baseCurrency: string,
-): Promise<string> {
-  const conversion = await convertToBase(Number(amount), currency, expenseDate, baseCurrency);
-  return toMoneyString(conversion.amountBase);
+): Promise<StoredAmount> {
+  const value = Number(amount);
+
+  if (!isConversionEnabled()) {
+    return { currency: baseCurrency, amountBase: toMoneyString(value) };
+  }
+
+  if (!CONVERTIBLE_CURRENCIES.includes(requestedCurrency)) {
+    throw new HttpError(400, `Cannot convert ${requestedCurrency}`, {
+      convertible: CONVERTIBLE_CURRENCIES,
+    });
+  }
+
+  const conversion = await convertToBase(value, requestedCurrency, expenseDate, baseCurrency);
+  return { currency: requestedCurrency, amountBase: toMoneyString(conversion.amountBase) };
 }
 
 export async function totalBetween(userId: string, from: string, to: string) {

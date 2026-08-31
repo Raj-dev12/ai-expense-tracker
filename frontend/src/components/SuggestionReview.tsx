@@ -24,6 +24,7 @@ export function SuggestionReview({
   confidence,
   provider,
   saving,
+  showCurrency,
   onSave,
   onCancel,
 }: {
@@ -31,6 +32,7 @@ export function SuggestionReview({
   confidence: number;
   provider: string;
   saving: boolean;
+  showCurrency: boolean;
   onSave: (expense: NewExpense) => void;
   onCancel: () => void;
 }) {
@@ -72,6 +74,7 @@ export function SuggestionReview({
         values={values}
         onChange={(patch) => setValues((current) => ({ ...current, ...patch }))}
         autoFocusAmount={suggestion.amount === null}
+        showCurrency={showCurrency}
       />
 
       {!usable && (

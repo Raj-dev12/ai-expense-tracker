@@ -18,6 +18,7 @@ export function RecentExpenses({
   expenses,
   total,
   currency,
+  showCurrency,
   editingId,
   savingEdit,
   editError,
@@ -28,6 +29,7 @@ export function RecentExpenses({
   expenses: Expense[];
   total: number;
   currency: string;
+  showCurrency: boolean;
   editingId: string | null;
   savingEdit: boolean;
   editError: string | null;
@@ -55,6 +57,7 @@ export function RecentExpenses({
                   expense={expense}
                   saving={savingEdit}
                   error={editError}
+                  showCurrency={showCurrency}
                   onSave={onSaveEdit}
                   onCancel={onCancelEdit}
                 />
@@ -88,9 +91,9 @@ export function RecentExpenses({
                   <p className="text-sm tabular-nums text-slate-900">
                     {formatMoney(expense.amountBase, currency)}
                   </p>
-                  {/* The original currency, quietly, and only when it differs from
-                      the base everything is reported in. */}
-                  {expense.currency !== currency && (
+                  {/* The original currency, quietly, and only when there is more
+                      than one currency in play and this row is in another one. */}
+                  {showCurrency && expense.currency !== currency && (
                     <p className="text-xs tabular-nums text-slate-400">
                       {expense.amount} {expense.currency}
                     </p>

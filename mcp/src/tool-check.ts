@@ -106,6 +106,9 @@ check("add_expense saves", !added.isError && added.body.startsWith("Saved:"), ad
 const id = added.body.match(/id is ([0-9a-f-]{36})/)?.[1];
 check("add_expense reports an id that can be used", Boolean(id), id ?? "none");
 
+// A currency the person did not actually have. With conversion off — which is
+// how this ships — the argument is ignored and the number is recorded as given,
+// so "100 USD" with a GBP base is 100 in the base and not a converted figure.
 const foreign = await callTool("add_expense", {
   amount: 100,
   currency: "USD",
@@ -114,25 +117,26 @@ const foreign = await callTool("add_expense", {
   expenseDate: "2026-07-14",
 });
 check(
-  "add_expense converts a foreign amount at the rate for the day",
-  !foreign.isError && foreign.body.includes("converted at the rate for 2026-07-14") && !foreign.body.includes("€92.00"),
+  "with conversion off, a currency argument is ignored",
+  !foreign.isError &&
+    foreign.body.includes(`${symbol}100.00`) &&
+    !foreign.body.includes("converted at the rate"),
   foreign.body,
 );
 const foreignId = foreign.body.match(/id is ([0-9a-f-]{36})/)?.[1];
 
 // --- editing -----------------------------------------------------------------
-// The rule worth proving is that an untouched field stays untouched. The euro
-// figure is the one that would give it away: renaming the shop on the dollar row
-// must not re-convert it.
-const beforeRename = foreign.body.match(/€([0-9.]+)/)?.[1];
+// The rule worth proving is that an untouched field stays untouched: renaming
+// the shop must not disturb the amount.
+const beforeRename = foreign.body.match(/([0-9]+\.[0-9]{2})/)?.[1];
 const renamed = foreignId
   ? await callTool("update_expense", { id: foreignId, merchant: "Tool check renamed" })
   : { body: "no id", isError: true };
 check("update_expense changes one field", !renamed.isError && renamed.body.includes("Tool check renamed"), renamed.body);
 check(
-  "update_expense leaves the euro amount alone when the money did not change",
-  Boolean(beforeRename) && renamed.body.includes(`€${beforeRename}`),
-  `was €${beforeRename}, now ${renamed.body.match(/€[0-9.]+/)?.[0]}`,
+  "update_expense leaves the amount alone when the money did not change",
+  Boolean(beforeRename) && renamed.body.includes(`${symbol}${beforeRename}`),
+  `was ${beforeRename}, now ${renamed.body.match(/[0-9]+\.[0-9]{2}/)?.[0]}`,
 );
 check("update_expense says which fields it changed", renamed.body.startsWith("Updated merchant."), renamed.body.slice(0, 40));
 
@@ -145,11 +149,9 @@ const repriced = foreignId
   ? await callTool("update_expense", { id: foreignId, amount: 200 })
   : { body: "no id", isError: true };
 check(
-  "update_expense re-converts when the amount changes",
-  !repriced.isError &&
-    !repriced.body.includes(`€${beforeRename}`) &&
-    repriced.body.includes("200.00 USD"),
-  `was €${beforeRename}, now ${repriced.body.match(/€[0-9.]+/)?.[0]}`,
+  "update_expense stores a new amount as given",
+  !repriced.isError && repriced.body.includes(`${symbol}200.00`),
+  repriced.body.slice(0, 60),
 );
 
 const emptyPatch = foreignId
@@ -180,9 +182,54 @@ const findable = await callTool("search_expenses", { query: "Tool check" });
 check("a row added through MCP is findable", !findable.isError && findable.body.includes("Tool check cafe"));
 check("rows added through MCP are marked as such", findable.body.includes("Tool check"), "source recorded server-side");
 
-// --- validation still belongs to the backend ---------------------------------
+// --- categories are read fresh, and the backend still enforces ---------------
+const BACKEND = process.env.BACKEND_URL ?? "http://localhost:3000";
+const liveCategories = (await (await fetch(`${BACKEND}/api/categories`)).json()) as {
+  categories: string[];
+};
+check(
+  "the server publishes its current categories",
+  Array.isArray(liveCategories.categories) && liveCategories.categories.length > 0,
+  liveCategories.categories?.join(", ").slice(0, 60),
+);
+
 const badCategory = await callTool("list_expenses", { category: "Snacks" });
 check("an invalid category is refused", badCategory.isError, badCategory.body.slice(0, 80));
+// The refusal has to be useful, not just correct: an assistant that is told the
+// real list can fix itself on the next call.
+check(
+  "the refusal names the categories that do exist",
+  liveCategories.categories.every((name) => badCategory.body.includes(name)),
+  badCategory.body.slice(0, 110),
+);
+
+const lowercase = await callTool("list_expenses", {
+  category: liveCategories.categories[0]!.toLowerCase(),
+  limit: 1,
+});
+check(
+  "a category in the wrong case is accepted, not nitpicked",
+  !lowercase.isError,
+  lowercase.body.slice(0, 60),
+);
+
+// The important half of the distinction. Everything above is the tool being
+// helpful; this is the rule being enforced. Going straight to the API bypasses
+// every check the MCP server makes, and it is still refused.
+const direct = await fetch(`${BACKEND}/api/expenses`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    amount: 5,
+    category: "Snacks",
+    expenseDate: new Date().toISOString().slice(0, 10),
+  }),
+});
+check(
+  "the backend refuses an invented category even with the tool bypassed",
+  direct.status === 400,
+  `POST /api/expenses with category "Snacks" answered ${direct.status}`,
+);
 
 const badAmount = await callTool("add_expense", { amount: -5, category: "Groceries" });
 check("a negative amount is refused", badAmount.isError, badAmount.body.slice(0, 80));

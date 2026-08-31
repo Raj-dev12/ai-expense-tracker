@@ -4,7 +4,7 @@ import { users } from "../db/schema.js";
 
 export const DEMO_USER_EMAIL = "demo@expense-tracker.local";
 
-export type DemoUser = { id: string; baseCurrency: string };
+export type DemoUser = { id: string; baseCurrency: string; baseCurrencyChosen: boolean };
 
 /**
  * There is no login, so the server decides which user a request belongs to.
@@ -26,7 +26,11 @@ export type DemoUser = { id: string; baseCurrency: string };
  * When real logins arrive one day, this function changes and nothing else does.
  */
 export async function getDemoUser(): Promise<DemoUser> {
-  const columns = { id: users.id, baseCurrency: users.baseCurrency };
+  const columns = {
+    id: users.id,
+    baseCurrency: users.baseCurrency,
+    baseCurrencyChosen: users.baseCurrencyChosen,
+  };
 
   const found = await db.select(columns).from(users).where(eq(users.email, DEMO_USER_EMAIL)).limit(1);
 
@@ -54,6 +58,16 @@ export async function getDemoUserId(): Promise<string> {
   return (await getDemoUser()).id;
 }
 
+/**
+ * Record the currency, and that it was actually chosen.
+ *
+ * The two go together on purpose: the only way to set a currency is to pick one,
+ * and picking one is what answers the first-visit question. Nothing else ever
+ * needs to flip the flag on its own.
+ */
 export async function setBaseCurrency(userId: string, baseCurrency: string): Promise<void> {
-  await db.update(users).set({ baseCurrency }).where(eq(users.id, userId));
+  await db
+    .update(users)
+    .set({ baseCurrency, baseCurrencyChosen: true })
+    .where(eq(users.id, userId));
 }

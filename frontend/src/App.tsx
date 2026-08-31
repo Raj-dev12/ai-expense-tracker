@@ -17,12 +17,12 @@ import {
   type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
   type ParseResponse,
-  type BaseCurrencyChange,
   type Summary,
   type Trend,
 } from "./api";
 import { formatMoney } from "./format";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
+import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryPie } from "./components/CategoryPie";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
@@ -81,7 +81,16 @@ export default function App() {
    */
   const [currency, setCurrency] = useState("EUR");
   const [currencySaving, setCurrencySaving] = useState(false);
-  const [lastCurrencyChange, setLastCurrencyChange] = useState<BaseCurrencyChange | null>(null);
+  /**
+   * Null until the first load answers. Three states rather than two: not known
+   * yet, known and answered, known and not answered — and the page must not
+   * flash the chooser at somebody who chose months ago just because the request
+   * has not landed.
+   */
+  const [currencyChosen, setCurrencyChosen] = useState<boolean | null>(null);
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  /** Off by default. When off there is one currency, so the UI stops asking. */
+  const [conversionEnabled, setConversionEnabled] = useState(false);
 
   /**
    * Which row is being edited, if any.
@@ -113,6 +122,9 @@ export default function App() {
         getSettings(),
       ]);
       setCurrency(settings.baseCurrency);
+      setCurrencyChosen(settings.baseCurrencyChosen);
+      setCurrencies(settings.currencies);
+      setConversionEnabled(settings.conversionEnabled);
       setRecent(list.expenses);
       setTotal(list.total);
       setSummary(nextSummary);
@@ -218,7 +230,7 @@ export default function App() {
   }
 
   async function handleBaseCurrencyChange(next: string) {
-    if (next === currency || currencySaving) return;
+    if (currencySaving) return;
 
     setCurrencySaving(true);
     setError(null);
@@ -227,9 +239,10 @@ export default function App() {
       // The endpoint rewrites the stored base figures for every foreign row, so
       // everything on screen is stale by the time it answers. Refetching is not
       // optional here.
-      const change = await setBaseCurrency(next);
-      setLastCurrencyChange(change);
-      // The written summary quoted amounts in the old currency.
+      await setBaseCurrency(next);
+      setCurrency(next);
+      setCurrencyChosen(true);
+      // The written summary quoted amounts under the old symbol.
       setMonthly(null);
       await refresh();
     } catch (caught) {
@@ -258,6 +271,28 @@ export default function App() {
     }
   }
 
+  /**
+   * The currency question comes before the app, not beside it.
+   *
+   * `currencyChosen` is null until the first request answers, and this
+   * deliberately renders nothing in that gap rather than guessing. Guessing
+   * false would flash the chooser at somebody who answered long ago; guessing
+   * true would flash the dashboard with amounts that have no symbol yet. A blank
+   * moment is the honest third option, and it lasts one request.
+   */
+  if (currencyChosen === false) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-6 py-20 text-slate-900">
+        <CurrencyChoice
+          currencies={currencies}
+          saving={currencySaving}
+          error={error}
+          onChoose={handleBaseCurrencyChange}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <main className="mx-auto max-w-4xl space-y-10 px-6 py-14">
@@ -271,8 +306,8 @@ export default function App() {
 
           <BaseCurrencyPicker
             value={currency}
+            currencies={currencies}
             saving={currencySaving}
-            lastChange={lastCurrencyChange}
             onChange={handleBaseCurrencyChange}
           />
         </header>
@@ -316,6 +351,7 @@ export default function App() {
               confidence={review.confidence}
               provider={review.provider}
               saving={saving}
+              showCurrency={conversionEnabled}
               onSave={handleSave}
               onCancel={handleDiscard}
             />
@@ -353,6 +389,7 @@ export default function App() {
               expenses={recent}
               total={total}
               currency={currency}
+              showCurrency={conversionEnabled}
               editingId={editingId}
               savingEdit={savingEdit}
               editError={editError}

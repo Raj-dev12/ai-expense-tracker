@@ -239,16 +239,19 @@ export function getCategories(): Promise<CategoryBreakdown> {
 
 const settingsSchema = z.object({
   baseCurrency: z.string(),
-  supportedCurrencies: z.array(z.string()),
+  /** False until a person has actually picked, rather than been given a default. */
+  baseCurrencyChosen: z.boolean(),
+  /** Off by default. When off there is one currency and it is the base. */
+  conversionEnabled: z.boolean(),
+  /** The full ISO 4217 list. */
+  currencies: z.array(z.string()),
+  convertibleCurrencies: z.array(z.string()),
 });
 
 const baseCurrencyChangeSchema = z.object({
   baseCurrency: z.string(),
   previousBaseCurrency: z.string(),
-  /** Rows that kept their number and are simply read as the new currency. */
-  relabelled: z.number(),
-  /** Rows that were genuinely foreign and were converted again. */
-  recomputed: z.number(),
+  baseCurrencyChosen: z.boolean(),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;

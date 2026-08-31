@@ -43,6 +43,21 @@ const envSchema = z.object({
   // and no account, which is what keeps the "runs with nothing configured"
   // promise true for currency conversion as well as for the AI.
   FX_API_URL: z.string().min(1).default("https://api.frankfurter.app"),
+
+  /**
+   * Whether foreign-currency conversion is switched on. Off by default.
+   *
+   * Off, there is one currency: the base. An amount is stored exactly as typed
+   * and a currency mentioned in a sentence is ignored, so "30 quid" with a euro
+   * base records 30 euros. Switching the base then only changes the symbol in
+   * front of every number, which makes it completely reversible.
+   *
+   * On, the whole conversion path above comes back: live rates from the day the
+   * money was spent, the business-day fallback, and the fixed table when the
+   * service cannot be reached. None of that code was deleted — it is behind this
+   * flag, and turning it on is the only step needed.
+   */
+  FX_CONVERSION: z.enum(["on", "off"]).default("off"),
 });
 
 const result = envSchema.safeParse(process.env);

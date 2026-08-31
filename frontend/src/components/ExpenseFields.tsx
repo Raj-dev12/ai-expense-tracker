@@ -42,10 +42,18 @@ export function ExpenseFields({
   values,
   onChange,
   autoFocusAmount = false,
+  showCurrency = true,
 }: {
   values: ExpenseFieldValues;
   onChange: (patch: Partial<ExpenseFieldValues>) => void;
   autoFocusAmount?: boolean;
+  /**
+   * Hidden when conversion is off, because then there is exactly one currency
+   * and it is the base. A dropdown offering a choice that will be ignored is
+   * worse than no dropdown: it invites somebody to set it and wonder why
+   * nothing happened.
+   */
+  showCurrency?: boolean;
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -60,19 +68,21 @@ export function ExpenseFields({
         />
       </Chip>
 
-      <Chip label="Currency">
-        <select
-          className={fieldClass}
-          value={values.currency}
-          onChange={(event) => onChange({ currency: event.target.value })}
-        >
-          {CURRENCIES.map((code) => (
-            <option key={code} value={code}>
-              {code}
-            </option>
-          ))}
-        </select>
-      </Chip>
+      {showCurrency && (
+        <Chip label="Currency">
+          <select
+            className={fieldClass}
+            value={values.currency}
+            onChange={(event) => onChange({ currency: event.target.value })}
+          >
+            {CURRENCIES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </Chip>
+      )}
 
       <Chip label="Merchant">
         <input

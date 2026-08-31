@@ -1010,6 +1010,20 @@ want when someone asks you about the project in six months.
 | The MCP server asks for the base every call | `baseCurrency()` before formatting, never cached | It is a setting a person can change in the browser mid-conversation. An assistant confidently reporting euros after a switch to pounds is wrong in the one way that matters, and the extra request is cheap beside the one the tool is already making. |
 | Rows are recomputed one at a time | A loop, not `Promise.all` | Each row needs the rate for its own date, and a demo's worth of rows would otherwise fire dozens of simultaneous requests at a free public service. Expenses cluster on the same handful of days, so the cache makes the repeats nearly free. |
 | The picker offers five currencies, not twelve | A short list beside the heading | A dropdown next to a heading is a glance-and-move-on control, and twelve options is a menu you have to read. An expense can still be *entered* in any of the twelve — a different question, which keeps its full list. |
+| Switching currency changes the symbol only — **supersedes the row above** | `PATCH /api/settings` writes one column and touches no amount | The previous rule recomputed foreign rows and relabelled the rest, which was defensible until you switched back: a row in the old base kept its number both ways, so its original conversion was gone for good. A base that is a pure label costs nothing while conversion is off, and buys the property that matters more — changing your mind is free. |
+| Conversion is off by default, not deleted | `FX_CONVERSION=off`, with every part of the rate code still present | The live lookup, the 24-hour cache, the business-day fallback and the static table are real work and the most interesting code in the repository. Deleting them to simplify the default would have thrown away the thing worth showing; a flag keeps both stories available. |
+| With conversion off, a named currency is ignored rather than refused | "30 quid" with a euro base records 30 euros | Refusing it would turn a perfectly clear sentence into an error over a distinction the app has stopped making. The parser can go on reading "quid"; nothing downstream acts on it. |
+| The currency field disappears when conversion is off | `showCurrency` threaded to the chips and the list | A dropdown offering a choice that will be ignored is worse than no dropdown: it invites somebody to set it and then wonder why nothing happened. |
+| The base accepts all 162 ISO 4217 codes | `Intl.supportedValuesOf("currency")`, not the dozen in the rate table | The base is a label now, so restricting it to currencies we can convert would enforce a rule that no longer applies. `Intl` ships the list in Node and every browser, so it costs no dependency and never goes stale. |
+| The currency is asked before the app, not inside it | A screen that replaces the dashboard until `base_currency_chosen` is true | The demo data is plain numbers, and what they are numbers *of* is not a detail to discover later — `1,741.66` with no symbol has said almost nothing. There is no skip, because every screen behind it needs the answer. |
+| "Not answered yet" is a third state, not `false` | `currencyChosen` starts null and the page renders nothing until the first request lands | Defaulting to false would flash the chooser at somebody who answered months ago; defaulting to true would flash a dashboard of unlabelled numbers. A blank moment lasting one request is the honest option. |
+| The seed resets the question | `baseCurrencyChosen: false` on the row it inserts | Re-seeding is how this demo returns to a known state, and the first-visit flow is part of that state. It also means the flow can be shown twice without touching the database by hand. |
+| The seed has no foreign-currency rows | The four USD/GBP/SEK/CHF expenses are gone | They existed to give the conversion column something to display. With conversion off they would contradict the whole premise: the moment somebody picked a currency other than the euro, four rows would be claiming otherwise. |
+| The MCP server keeps no category list | `currentCategories()` reads `GET /api/categories` on every call | It held a hardcoded copy of the nine names, which is a second definition of the list living somewhere nothing can update. Read fresh, an assistant is never offered a category the server has stopped recognising, and never kept from one it has just gained. |
+| `/api/categories` reads the table, not the constant | `categories` is the list's home | The table had been written by the seed and read by nothing since hour 1. Asking a constant "what categories exist?" answers a question about the build rather than about the data, and would not notice a category being added. |
+| The tool guides; the schema enforces | An unknown category is answered with the real list, and refused again by Zod | Two different jobs. The MCP check exists so an assistant gets a *useful* failure it can act on; the backend enum exists so nothing can get past it. Removing the first would make the assistant guess; removing the second would let it succeed. Proved by posting an invented category straight to the API with the tool bypassed, and getting a 400. |
+| Category matching is case-insensitive | "groceries" resolves to "Groceries" | It is obviously the same choice, and refusing it would be pedantry rather than validation. The stored spelling is what gets sent on, so the API only ever sees a name it knows. |
+| The category argument is a string, not an enum | Validated at call time instead of in the tool schema | An MCP tool schema is registered once at startup, so an enum in it is a snapshot — exactly the cached copy this change removes. A string plus a live check is the only shape that can stay current. |
 
 ---
 
@@ -2128,3 +2142,141 @@ which was the right instinct.
 
 The database is back on EUR with its original figures, so the switch to GBP is there to be
 made in the browser rather than already done.
+
+### Session 18 — the currency becomes a label, and a question asked first
+
+**Reversing a decision from one session ago**
+
+Session 17 made the base currency real: switching it recomputed every foreign row and
+relabelled the rest. It worked, and testing it turned up the flaw — a round trip is lossy. A
+row in the old base kept its number in both directions, so switching EUR → GBP → EUR left a
+£42.50 expense reading €42.50 instead of the €49.72 it started with.
+
+That was noted at the time as "the same rule applied twice, not a bug". On reflection it is a
+bug in the *rule*, and the rule is what changed: **the base currency now changes the symbol
+and nothing else.** `PATCH /api/settings` writes one column and touches no amount. EUR → JPY →
+SEK → EUR was run against 93 real rows and the fingerprint of every stored figure came back
+byte-for-byte identical.
+
+**Turning something off without deleting it**
+
+The conversion code is the most interesting code in this repository: a live rate lookup, a
+24-hour cache, a fallback to the previous business day because the ECB does not publish at
+weekends, and a fixed table for when the service cannot be reached. Deleting it to simplify
+the default would have thrown that away.
+
+So it is behind `FX_CONVERSION`, off by default, and both paths are tested. Off, `100 USD`
+records as 100 in the base. On, the same call converted $100 to £74.72 at the rate for the day.
+One environment variable, and the README says which line to change.
+
+The flag also had to be added to `docker-compose.yml`, which is the sort of thing that is
+easy to miss: a flag the compose file never passes through is a flag that cannot be turned on
+where the app actually runs.
+
+**One function, two modes**
+
+`storedAmountFor` decides what a row stores, and both the create and patch routes call it.
+Off, it returns the amount as typed and the base as the currency. On, it converts. The
+alternative — an `if` in each route — is how the two would eventually disagree about what
+"30 quid" means.
+
+**The question that comes first**
+
+The demo data is plain numbers now, which makes "which currency?" the first thing worth
+establishing rather than a setting to find later. A page showing `1,741.66` with no symbol has
+told you almost nothing.
+
+So `users.base_currency_chosen` gates the app. False on a fresh database and after every
+re-seed; the chooser replaces the dashboard until it is answered; there is no skip, because
+every screen behind it needs the answer.
+
+The state that mattered was the third one. `chosen` starts as **null**, not false, and the
+page renders nothing until the first request lands. Defaulting to false would flash the
+chooser at somebody who answered long ago. Defaulting to true would flash a dashboard of
+unlabelled numbers. A blank moment lasting one request is the only honest option, and it is
+the kind of thing that only shows up as a flicker in a real browser.
+
+**162 currencies is a wall, not a list**
+
+`Intl.supportedValuesOf("currency")` gives the full ISO 4217 list free, and a `<select>` with
+162 options in it is unusable. The chooser has five quick picks and a search box that filters
+on `Intl.DisplayNames`, so "pound" finds GBP as readily as typing the code does.
+
+**Checks that had to be rewritten rather than fixed**
+
+Three MCP checks failed after this, all of them asserting conversion behaviour that is now
+off by default — the tools were right and the checks were describing the old world. Two
+render checks went the same way. That is the second time this project has had to change a
+test because the decision underneath it changed, and it is worth distinguishing from the
+several times a test was simply wrong: **a failing check after a deliberate reversal is the
+check doing its job.**
+
+**Verified**
+
+Round trip lossless across three currencies. `"30 quid"` parsed with a euro base returns EUR
+and stores 30. An explicit `currency: "GBP"` on the create endpoint is ignored. Conversion
+switched on converts and switched off does not. 93 seeded rows, all in one currency. 67
+backend tests, three typechecks, all render checks, all seven MCP tools over stdio.
+
+### Session 19 — the MCP server stops carrying its own copy of the category list
+
+**What changed**
+
+`mcp/src/backend.ts` had the nine category names hardcoded, and all three tools that take a
+category declared `z.enum(CATEGORY_NAMES)`. That is a second definition of the list, living in
+a client, that nothing on the server can update.
+
+Now there is `GET /api/categories`, and the tools read it on every call — the same treatment
+the base currency already had, for the same reason: it is a list that can change while an
+assistant is mid-conversation.
+
+**A table that had been written and never read**
+
+The `categories` table has existed since hour 1. The seed fills it. Nothing has ever read it —
+every consumer went to the `CATEGORY_NAMES` constant instead. The new endpoint reads the
+table, because that is where a category would appear if one were ever added; a constant
+answers a question about the build rather than about the data.
+
+**Why the argument stopped being an enum**
+
+An MCP tool schema is registered once when the server starts. An enum in it is therefore a
+snapshot, which is the very thing being removed. So the argument is a plain string, checked at
+call time against the live list, and an unknown value comes back as:
+
+```
+"Snacks" is not one of the categories. The current ones are: Groceries, Restaurants, ...
+```
+
+That is how a static schema can still offer a live list: not by describing it, but by handing
+it over the moment it is needed.
+
+**Guidance and enforcement are different jobs**
+
+Worth stating plainly because it is easy to collapse the two. The tool description steers the
+assistant. The check inside the tool makes a failure useful. **Neither of them enforces
+anything.** The rule is the Zod enum on `POST /api/expenses`, and the check that proves it
+skips the MCP server entirely — posting `category: "Snacks"` straight at the API still
+returns a 400.
+
+Deleting the tool-side check would leave an assistant guessing after a bare 400. Deleting the
+backend enum would let a guess succeed. They are not redundant; they fail differently on
+purpose.
+
+**The premise that did not hold**
+
+The brief asked for "the defaults plus any the user has added". There is no way to add a
+category — no endpoint, no interface, and the fixed list is a locked decision in the build
+plan. So today that phrase means the nine defaults.
+
+What was built is the *mechanism*: the server publishes whatever the table holds, and the
+tools read it fresh. Adding a category later needs no change here. It would need one on the
+backend, though, and it is worth knowing in advance: `createExpenseSchema` validates against
+the constant, so a row added to the table would be offered by the tools and then refused by
+the API. The enum is the thing that has to become dynamic on the day that feature is started.
+
+**Verified**
+
+Nine tool checks, including the round trip through the real protocol: the endpoint publishes
+nine names, an invalid category is refused with all nine listed in the message, a lowercase
+name is accepted, and the backend still returns 400 with the tool bypassed. All seven tools
+work over stdio. 67 backend tests, three typechecks, all render checks.

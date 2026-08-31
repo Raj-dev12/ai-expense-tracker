@@ -54,6 +54,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FX_API_URL: ${FX_API_URL:-https://api.frankfurter.app}
+      # Off by default: one currency, the base, and amounts stored exactly as
+      # typed. Set to "on" to bring back live conversion from the day an expense
+      # was spent. The code for it is all still here.
+      FX_CONVERSION: ${FX_CONVERSION:-off}
 
       # The seed script deletes every expense before writing, so it stays off
       # unless .env says otherwise. It is never run automatically — it is run by

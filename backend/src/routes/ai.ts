@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getParser } from "../ai/index.js";
+import { isConversionEnabled } from "../fx/rates.js";
 import { monthLabel, todayIso } from "../lib/dates.js";
 import { categoryTotalsBetween, monthToDate } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
@@ -25,6 +26,7 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post("/api/ai/parse-expense", async (request) => {
     const input = validate(parseExpenseRequestSchema, request.body, "sentence");
+    const { baseCurrency } = await getDemoUser();
     const parser = getParser();
 
     const result = await parser.parseExpense({
@@ -48,10 +50,16 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
       // Who actually answered, which on a fallback is the mock rather than the
       // provider named in the configuration.
       provider: checked.data.producedBy,
+      // The suggestion is shown to a person who then confirms it, so it has to
+      // describe what will actually be stored. With conversion off that is the
+      // base currency whatever the sentence said — the parser can go on reading
+      // "quid" out of a sentence, but nothing downstream will act on it.
       // Stated explicitly, because it is the promise this endpoint makes.
       saved: false,
       confidence: checked.data.confidence,
-      suggestion: checked.data.suggestion,
+      suggestion: isConversionEnabled()
+        ? checked.data.suggestion
+        : { ...checked.data.suggestion, currency: baseCurrency },
     };
   });
 

@@ -4,6 +4,7 @@ import { env } from "./env.js";
 import { HttpError } from "./lib/http-error.js";
 import { aiRoutes } from "./routes/ai.js";
 import { analyticsRoutes } from "./routes/analytics.js";
+import { categoryRoutes } from "./routes/categories.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { healthRoutes } from "./routes/health.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -42,6 +43,7 @@ await app.register(expenseRoutes);
 await app.register(aiRoutes);
 await app.register(analyticsRoutes);
 await app.register(settingsRoutes);
+await app.register(categoryRoutes);
 
 // Docker containers need 0.0.0.0 rather than localhost, or nothing outside the
 // container can reach the server.

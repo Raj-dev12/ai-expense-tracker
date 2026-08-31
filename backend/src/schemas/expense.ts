@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CATEGORY_NAMES } from "../lib/categories.js";
-import { SUPPORTED_CURRENCIES } from "../fx/rates.js";
+import { ISO_CURRENCIES } from "../fx/rates.js";
 import { addDays, todayIso } from "../lib/dates.js";
 
 /**
@@ -43,12 +43,21 @@ export const isoDateSchema = z.string().superRefine((value, ctx) => {
   }
 });
 
+/**
+ * Any code ISO 4217 recognises.
+ *
+ * Deliberately wider than the dozen the rate table covers. With conversion off a
+ * currency named in a sentence is ignored rather than refused, so rejecting it
+ * here would turn "30 quid" into an error instead of 30 in the base currency.
+ * Whether a currency can actually be *converted* is a separate question, asked
+ * in storedAmountFor and only when conversion is on.
+ */
 export const currencySchema = z
   .string()
   .trim()
   .toUpperCase()
-  .refine((value) => SUPPORTED_CURRENCIES.includes(value), {
-    message: `Currency must be one of: ${SUPPORTED_CURRENCIES.join(", ")}`,
+  .refine((value) => ISO_CURRENCIES.includes(value), {
+    message: "Not a currency code ISO 4217 recognises",
   });
 
 export const categorySchema = z.enum(CATEGORY_NAMES);

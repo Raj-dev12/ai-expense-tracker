@@ -21,7 +21,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
-import { BaseCurrencyPicker, COMMON_BASE_CURRENCIES } from "./components/BaseCurrencyPicker";
+import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
+import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
 import { buildPatch } from "./components/ExpenseEditor";
 import { MonthlySummary } from "./components/MonthlySummary";
@@ -57,6 +58,7 @@ const review = renderToStaticMarkup(
     confidence={0.95}
     provider="mock"
     saving={false}
+    showCurrency={true}
     onSave={() => {}}
     onCancel={() => {}}
   />,
@@ -75,7 +77,7 @@ const noAmount = renderToStaticMarkup(
       amount: null, currency: "EUR", merchant: null, category: "Other",
       description: "coffee", expenseDate: "2026-08-31",
     }}
-    confidence={0.4} provider="mock" saving={false} onSave={() => {}} onCancel={() => {}}
+    confidence={0.4} provider="mock" saving={false} showCurrency={true} onSave={() => {}} onCancel={() => {}}
   />,
 );
 check("missing amount is explained", noAmount.includes("No amount was found"));
@@ -190,6 +192,7 @@ const expenses: Expense[] = [
 ];
 const listProps = {
   currency: "EUR",
+  showCurrency: true,
   editingId: null,
   savingEdit: false,
   editError: null,
@@ -378,23 +381,28 @@ check("currency: the list follows the base", listGbp.includes("£35.10"));
 check("currency: a row in the old base now shows its original", listGbp.includes("12.50 EUR"));
 check("currency: the row in the base currency still does not repeat itself", !listGbp.includes("30.00 GBP"));
 
-// 11. The base currency picker says what switching will do.
+// 11. The base currency picker, and the first-visit choice.
 const picker = renderToStaticMarkup(
-  <BaseCurrencyPicker value="EUR" saving={false} lastChange={null} onChange={() => {}} />,
+  <BaseCurrencyPicker value="EUR" currencies={["EUR", "GBP", "SEK"]} saving={false} onChange={() => {}} />,
 );
 check("picker: labelled", picker.includes("Totals in"));
-check("picker: offers a short list, not all twelve", (picker.match(/<option/g) ?? []).length === COMMON_BASE_CURRENCIES.length);
-check("picker: warns that it relabels rather than converts", picker.includes("Relabels amounts already in this currency"));
+check("picker: offers the list it was given", (picker.match(/<option/g) ?? []).length === 3);
+// The behaviour changed: switching used to recompute foreign rows and relabel
+// the rest, which made a round trip lossy. It now only changes the symbol, and
+// the note has to say so rather than describing the old two-way split.
+check("picker: promises the symbol only", picker.includes("Changes the symbol only"));
+check("picker: no longer claims to convert anything", !picker.includes("converted again"));
 
-const afterSwitch = renderToStaticMarkup(
-  <BaseCurrencyPicker
-    value="GBP"
-    saving={false}
-    lastChange={{ baseCurrency: "GBP", previousBaseCurrency: "EUR", relabelled: 95, recomputed: 3 }}
-    onChange={() => {}}
-  />,
+const choice = renderToStaticMarkup(
+  <CurrencyChoice currencies={["EUR", "GBP", "SEK", "JPY"]} saving={false} error={null} onChoose={() => {}} />,
 );
-check("picker: reports how many kept their number", afterSwitch.includes("95 expenses kept their number"));
-check("picker: reports how many were converted", afterSwitch.includes("3 in another currency were converted again"));
+check("first visit: asks before anything else", choice.includes("Which currency do you use"));
+check("first visit: explains the demo numbers are plain", choice.includes("plain numbers"));
+check("first visit: says it can be changed later", choice.includes("change it later"));
+check("first visit: offers every currency it was given", (choice.match(/<option/g) ?? []).length === 4);
+check("first visit: names the one that will be used", choice.includes("Use EUR"));
+// No skip. Every screen behind this one needs an answer, so offering a way past
+// it would only produce amounts with no symbol.
+check("first visit: cannot be skipped", !/skip|later|dismiss/i.test(choice.replace(/change it later/gi, "")));
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");

@@ -1,14 +1,22 @@
 import { z } from "zod";
-import { currencySchema } from "./expense.js";
+import { ISO_CURRENCIES } from "../fx/rates.js";
 
 /**
  * The body of PATCH /api/settings.
  *
- * `currencySchema` is the same one an expense uses, so the list of currencies a
- * person can report totals in and the list they can spend in cannot drift apart.
+ * Validated against the full ISO 4217 list rather than the dozen the rate table
+ * covers. With conversion off the base is a label — it decides which symbol sits
+ * in front of a number and nothing else — so restricting it to currencies we can
+ * convert would be enforcing a rule that no longer applies.
  */
 export const updateSettingsSchema = z.strictObject({
-  baseCurrency: currencySchema,
+  baseCurrency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((value) => ISO_CURRENCIES.includes(value), {
+      message: "Not a currency code ISO 4217 recognises",
+    }),
 });
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;

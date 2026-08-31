@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import { env } from "../env.js";
-import { convertWithStaticRate } from "../fx/rates.js";
 import { addDays, todayIso } from "../lib/dates.js";
 import type { CategoryName } from "../lib/categories.js";
 import { CATEGORY_NAMES } from "../lib/categories.js";
@@ -171,23 +170,17 @@ const PLAN: readonly Plan[] = [
 ];
 
 /**
- * A handful of expenses in other currencies, so the converted-to-euro column and
- * the "show the original currency" part of the interface both have something
- * real to display.
+ * There are no foreign-currency rows any more.
+ *
+ * The demo data is plain numbers with no inherent currency, which is the whole
+ * point now: the base currency is a label, chosen on first visit, and these
+ * amounts read as whatever was picked. Rows carrying a real currency would have
+ * contradicted that the moment somebody chose anything other than the euro.
+ *
+ * The conversion code they existed to exercise is still in the repository, off
+ * behind FX_CONVERSION. Turning it on and adding rows by hand is the way to see
+ * it work.
  */
-const FOREIGN: ReadonlyArray<{
-  amount: number;
-  currency: string;
-  merchant: string;
-  category: CategoryName;
-  note: string;
-  daysAgo: number;
-}> = [
-  { amount: 89.99, currency: "USD", merchant: "Amazon", category: "Shopping", note: "Books ordered from the US", daysAgo: 12 },
-  { amount: 42.5, currency: "GBP", merchant: "The Breakfast Club", category: "Restaurants", note: "Brunch in London", daysAgo: 34 },
-  { amount: 640, currency: "SEK", merchant: "SJ", category: "Travel", note: "Train across Sweden", daysAgo: 47 },
-  { amount: 28.4, currency: "CHF", merchant: "Migros", category: "Groceries", note: "Groceries in Zurich", daysAgo: 61 },
-];
 
 async function main() {
   const today = todayIso();
@@ -205,7 +198,9 @@ async function main() {
   console.log("Inserting the demo user...");
   const [user] = await db
     .insert(users)
-    .values({ email: DEMO_USER_EMAIL, baseCurrency: "EUR" })
+    // baseCurrencyChosen stays false, so a freshly seeded demo asks which
+    // currency these numbers are in before letting anything be entered.
+    .values({ email: DEMO_USER_EMAIL, baseCurrency: "EUR", baseCurrencyChosen: false })
     .returning({ id: users.id });
 
   if (!user) throw new Error("The demo user could not be created");
@@ -219,6 +214,9 @@ async function main() {
       rows.push({
         userId: user.id,
         amount: toMoneyString(amount),
+        // Plain numbers. The currency column records the base at the moment
+        // of writing; nothing reads it while conversion is off, because there
+        // is only ever one currency for it to be.
         currency: "EUR",
         amountBase: toMoneyString(amount),
         merchant: merchant.name,
@@ -230,22 +228,6 @@ async function main() {
     }
   }
 
-  for (const item of FOREIGN) {
-    rows.push({
-      userId: user.id,
-      amount: toMoneyString(item.amount),
-      currency: item.currency,
-      // The fixed table on purpose: a seed that fetched live rates would put
-      // different euro amounts in the database every day, which would undo the
-      // point of seeding from a fixed random seed.
-      amountBase: toMoneyString(convertWithStaticRate(item.amount, item.currency).amountBase),
-      merchant: item.merchant,
-      category: item.category,
-      description: item.note,
-      expenseDate: addDays(today, -item.daysAgo),
-      source: "seed",
-    });
-  }
 
   console.log(`Inserting ${rows.length} expenses across the last ${DAYS_OF_HISTORY} days...`);
   await db.insert(expenses).values(rows);

@@ -31,7 +31,28 @@ export const STATIC_EUR_RATES: Record<string, number> = {
   AUD: 0.6,
 };
 
-export const SUPPORTED_CURRENCIES = Object.keys(STATIC_EUR_RATES);
+/**
+ * The currencies this app can actually convert between. Only meaningful when
+ * FX_CONVERSION is on.
+ */
+export const CONVERTIBLE_CURRENCIES = Object.keys(STATIC_EUR_RATES);
+
+/** Kept under the old name so nothing that imported it has to change. */
+export const SUPPORTED_CURRENCIES = CONVERTIBLE_CURRENCIES;
+
+/**
+ * Every currency code ISO 4217 defines, straight from the platform.
+ *
+ * The base currency is a label — with conversion off it changes the symbol in
+ * front of a number and nothing else — so there is no reason to restrict it to
+ * the dozen the rate table covers. `Intl.supportedValuesOf` is built into Node
+ * and every browser, so this list costs no dependency and never goes stale.
+ */
+export const ISO_CURRENCIES: string[] = Intl.supportedValuesOf("currency");
+
+export function isConversionEnabled(): boolean {
+  return env.FX_CONVERSION === "on";
+}
 
 /** Where a rate came from, so the caller can say so rather than guess. */
 export type RateSource = "live" | "fallback" | "base";

@@ -3,15 +3,16 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   BackendError,
-  CATEGORY_NAMES,
   CURRENCIES,
   baseCurrency,
   call,
+  currentCategories,
   categoryBreakdownSchema,
   deletedSchema,
   expenseListSchema,
   expenseSchema,
   formatExpense,
+  matchCategory,
   money,
   query,
   summarySchema,
@@ -58,6 +59,34 @@ function text(body: string) {
   return { content: [{ type: "text" as const, text: body }] };
 }
 
+/**
+ * Turn a category an assistant guessed into one that exists, or explain.
+ *
+ * The list is read fresh on every call, like the base currency, so a category
+ * added a minute ago is usable immediately and one that has gone is not offered.
+ *
+ * This guides; it does not enforce. The backend rejects an unknown category
+ * whatever happens here — that check is the one that matters, and it is the one
+ * that cannot be talked around. What this adds is a *useful* failure: an
+ * assistant told "Snacks is not a category, the current ones are Groceries,
+ * Restaurants, ..." can correct itself on the next call, where a bare 400 leaves
+ * it guessing again.
+ */
+async function resolveCategory(given: string): Promise<{ name: string } | { error: string }> {
+  const available = await currentCategories();
+  const matched = matchCategory(given, available);
+
+  if (!matched) {
+    return {
+      error:
+        `"${given}" is not one of the categories. ` +
+        `The current ones are: ${available.join(", ")}.`,
+    };
+  }
+
+  return { name: matched };
+}
+
 const isoDate = z
   .string()
   .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "Write the date as YYYY-MM-DD");
@@ -73,19 +102,25 @@ server.registerTool(
     description:
       "Record a new expense. Use this when the person says they spent money on something and " +
       "wants it kept. The amount and the category are required; everything else is optional. " +
-      "Amounts in other currencies are converted to the base currency automatically, using " +
-      "the exchange " +
-      "rate from the day it was spent, so pass the amount exactly as it was spent rather than " +
-      "converting it yourself. Work out the date before calling: if they say 'yesterday', send " +
+      "Currency conversion is off by default on this server, and with it off the currency " +
+      "argument is ignored: the amount is recorded as given, in whatever currency the person " +
+      "has set as their base. Send the number they said and do not convert anything yourself. " +
+      "Work out the date before calling: if they say 'yesterday', send " +
       "yesterday's date as YYYY-MM-DD. Leave the date out only if it happened today. This " +
       "writes to their records, so do not call it to answer a question.",
     inputSchema: {
       amount: z.number().positive().describe("How much was spent, in the currency it was spent in"),
-      category: z.enum(CATEGORY_NAMES).describe("The single category that fits best"),
+      category: z
+        .string()
+        .describe(
+          "The single category that fits best. Call this tool with any value to be told " +
+            "the current list if you are unsure — the categories are read fresh from the " +
+            "server on every call rather than fixed in this description",
+        ),
       currency: z
         .enum(CURRENCIES)
         .optional()
-        .describe("Three-letter code. Defaults to EUR when the person did not say"),
+        .describe("Three-letter code. Ignored unless the server has conversion switched on"),
       merchant: z.string().max(120).optional().describe("The shop or company, if one was named"),
       description: z.string().max(500).optional().describe("A short note about what it was for"),
       expenseDate: isoDate.optional().describe("The day it was spent. Defaults to today"),
@@ -94,6 +129,9 @@ server.registerTool(
   },
   async (args) => {
     try {
+      const category = await resolveCategory(args.category);
+      if ("error" in category) return fail(new BackendError(category.error));
+
       const base = await baseCurrency();
       const saved = await call("/api/expenses", expenseSchema, {
         method: "POST",
@@ -101,7 +139,7 @@ server.registerTool(
           amount: args.amount,
           currency: args.currency ?? "EUR",
           merchant: args.merchant ?? null,
-          category: args.category,
+          category: category.name,
           description: args.description ?? null,
           expenseDate: args.expenseDate ?? today(),
           // Recorded so the person can see which rows an assistant created.
@@ -131,9 +169,8 @@ server.registerTool(
       "meant; if more than one could match, show them and ask which. Send only the fields " +
       "being changed: anything left out keeps its current value, so to correct a shop name " +
       "you send the id and the merchant and nothing else. Send merchant or description as " +
-      "null to empty them. Changing the amount, the currency or the date re-converts the base " +
-      "figure automatically using the rate for the day it was spent, so pass the amount as it " +
-      "was actually spent rather than converting it yourself. This overwrites stored data and " +
+      "null to empty them. Currency conversion is off by default, and with it off the amount " +
+      "is stored exactly as given. This overwrites stored data and " +
       "cannot be undone, so only use it when the person has asked for a change.",
     inputSchema: {
       id: z.string().describe("The id of the expense to change, taken from a listing"),
@@ -142,14 +179,17 @@ server.registerTool(
         .positive()
         .optional()
         .describe("A corrected amount, in the currency it was spent in"),
-      currency: z.enum(CURRENCIES).optional().describe("A corrected three-letter code"),
+      currency: z
+        .enum(CURRENCIES)
+        .optional()
+        .describe("A corrected code. Ignored unless the server has conversion switched on"),
       merchant: z
         .string()
         .max(120)
         .nullable()
         .optional()
         .describe("A corrected shop or company. Pass null to clear it"),
-      category: z.enum(CATEGORY_NAMES).optional().describe("A corrected category"),
+      category: z.string().optional().describe("A corrected category, from the current list"),
       description: z
         .string()
         .max(500)
@@ -170,6 +210,14 @@ server.registerTool(
       const patch = Object.fromEntries(
         Object.entries(changes).filter(([, value]) => value !== undefined),
       );
+
+      // Checked against the live list only when the edit actually names one, so
+      // correcting a shop name costs no extra request.
+      if (typeof patch.category === "string") {
+        const category = await resolveCategory(patch.category);
+        if ("error" in category) return fail(new BackendError(category.error));
+        patch.category = category.name;
+      }
 
       const base = await baseCurrency();
       const updated = await call(`/api/expenses/${id}`, expenseSchema, {
@@ -237,19 +285,34 @@ server.registerTool(
     inputSchema: {
       from: isoDate.optional().describe("Only expenses on or after this day"),
       to: isoDate.optional().describe("Only expenses on or before this day"),
-      category: z.enum(CATEGORY_NAMES).optional().describe("Only this category"),
-      minAmount: z.number().nonnegative().optional().describe("Only amounts at or above this, in euros"),
+      category: z.string().optional().describe("Only this category, from the current list"),
+      minAmount: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Only amounts at or above this, in the base currency"),
       limit: z.number().int().min(1).max(200).optional().describe("How many to return. Defaults to 20"),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
   async (args) => {
     try {
+      // A filter naming a category that does not exist would quietly return
+      // nothing, which reads as "you spent nothing on that" rather than "there
+      // is no such category". Checking first turns a silent wrong answer into a
+      // useful one.
+      let category = args.category;
+      if (category !== undefined) {
+        const resolved = await resolveCategory(category);
+        if ("error" in resolved) return fail(new BackendError(resolved.error));
+        category = resolved.name;
+      }
+
       const result = await call(
         `/api/expenses${query({
           from: args.from,
           to: args.to,
-          category: args.category,
+          category,
           minAmount: args.minAmount,
           limit: args.limit ?? 20,
         })}`,

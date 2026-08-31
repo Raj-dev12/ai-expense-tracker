@@ -7,7 +7,8 @@ before anything is saved.
 
 ![The single page: an add box, summary cards, a category breakdown, a weekly trend line and the recent expenses](docs/screenshot.png)
 
-<sub>Sample data. Each row in the recent list says where it came from — `added by seed`,
+<sub>Sample data, shown in euros — the currency is chosen on first run, so yours may read
+differently. Each row in the recent list says where it came from — `added by seed`,
 `added by mcp` — which is the `source` column described further down.</sub>
 
 ---
@@ -20,9 +21,8 @@ a date. The page shows that suggestion as editable chips so you can correct anyt
 wrong, and only when you press confirm does the browser call the ordinary, validated endpoint
 that writes a row. Below the box, a dashboard shows the month's total against the same
 stretch of last month, a pie of where the money went, a fourteen-week trend line, and the
-most recent expenses. Amounts entered in another currency are converted to euros using the
-European Central Bank's rate *for the day they were spent*, and both figures are kept. The
-currency the totals are reported in is a setting, picked from a short list at the top right. A
+most recent expenses. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
+and every amount is shown in it; changing it later moves no stored number. A
 button asks the AI to describe the month in a sentence or two, and the card underneath it says
 which parser actually wrote that sentence. Any row in the list can be corrected in place,
 using the same chips the confirm step uses. An MCP server lets an outside AI assistant query
@@ -62,7 +62,7 @@ anywhere else.
 | AI | `@anthropic-ai/sdk`, `openai`, and an offline mock | One `ExpenseParser` interface, three implementations, chosen by an environment variable. |
 | MCP | `@modelcontextprotocol/sdk` over stdio | Seven tools, each calling the backend's HTTP API rather than the database. |
 | Serving | Caddy | Serves the built frontend, proxies `/api`, and obtains HTTPS certificates by itself. |
-| Exchange rates | Frankfurter (ECB data) | Free, no key, history back to 1999. Cached for 24 hours, with a static fallback table. |
+| Exchange rates | Frankfurter (ECB data) | Free, no key, history back to 1999. Cached for 24 hours, with a static fallback table. Switched off by default — see below. |
 
 ## Running it locally
 
@@ -79,7 +79,7 @@ No API key is needed and nothing in `.env` needs editing first — see [It runs 
 key](#it-runs-with-no-api-key). The backend applies its own database migrations every time it
 starts, so there is no separate setup step.
 
-The app starts with an empty database. To load the demo data — one user and 97 expenses
+The app starts with an empty database. To load the demo data — one user and 93 expenses
 spread over three months, generated from a fixed random seed so it is identical every time:
 
 ```bash
@@ -140,33 +140,44 @@ instead. If that provider errors, times out, or returns something that fails val
 request falls back to the mock rather than failing — and the response names the parser that
 *actually* answered, not the one configured, because on a fallback those differ.
 
-## The base currency is a setting
+## The currency is the first question
 
-Every expense stores two figures: what was actually spent (`amount` and `currency`) and what
-that was worth in the base currency (`amount_base`). The base is picked from a short list at
-the top right of the page, and it is stored against the user rather than hardcoded.
+There is no conversion by default. There is one currency — yours — and you pick it before
+anything else happens, on a screen that comes before the dashboard rather than beside it. The
+demo expenses are plain numbers, so what they are numbers *of* is the first thing worth
+establishing; a page showing `1,741.66` with no symbol has told you almost nothing.
 
-Switching it does two different things to two different kinds of row, and the difference is
-worth understanding before you click it:
+The choice is remembered against the user, so it is asked once. Afterwards the picker at the
+top right changes it, offering all 162 codes ISO 4217 defines.
 
-| The row | What happens |
-|---|---|
-| Recorded in the **old base** — a `42 EUR` expense while the base was EUR | Keeps its number. It now reads as `£42`. |
-| Recorded in **some other currency** — a `30 GBP` expense holding a euro figure | Recomputed, at the rate for the day it was spent. |
+**Switching currency changes the symbol and nothing else.** No stored figure moves, so going
+from EUR to JPY to SEK and back to EUR leaves the database byte for byte where it started.
+Re-running the seed resets the question so the first-visit flow can be seen again.
 
-The first case is a **relabel, not a conversion**, and the control says so in as many words.
-There is no rate that makes `£42` the "correct" reading of something recorded as plain `42`:
-no conversion ever happened for that row, because it was already in the base. Converting it
-would be inventing a number the records never contained.
+### Conversion is still here, switched off
 
-The consequence to know about: **switching back and forth is lossy.** A `30 GBP` expense
-becomes `£30` under a GBP base, and switching back to EUR relabels it as `€30` rather than
-restoring the `€35.10` it used to hold. That is the same rule applied twice, not a bug, but
-it does mean the base is a decision rather than a toggle to play with. Re-running the seed
-resets everything if you have been experimenting.
+An earlier version of this converted every foreign amount to a base currency at the European
+Central Bank's rate for the day it was spent. All of that code is still in the repository —
+the live rate lookup, the 24-hour cache, the business-day fallback for weekend dates, and the
+fixed table used when the service cannot be reached. It is behind one environment variable:
 
-The recomputation goes through the same function the create and edit routes use, so there is
-one definition of what `amount_base` should be and not three.
+```bash
+FX_CONVERSION=on    # in .env, then: docker compose up -d backend
+```
+
+With it **off** (the default), a currency named in a sentence is ignored and the number is
+stored exactly as typed — "30 quid" with a euro base records 30 euros. The currency field
+disappears from the interface, because offering a choice that will be ignored is worse than
+offering none.
+
+With it **on**, the amount is converted at the rate from the day it was spent, both figures
+are kept, and the original currency appears in small text beside any row that was not in the
+base. The seed data has no foreign rows any more, so the way to see it work is to switch the
+flag on and add one.
+
+Why off by default: conversion made the base currency load-bearing. Changing it had to
+rewrite stored figures, which made switching lossy and irreversible. Off, the base is a label,
+and a label can be changed as often as you like.
 
 ## The MCP server runs locally, not in compose
 
@@ -184,6 +195,13 @@ over the network, exactly as a browser does.
 That has a second benefit worth naming. Because every tool goes through the public API, the
 validation rules live in exactly one place — the MCP server cannot store an expense the web
 form would have rejected, because it uses the endpoint the web form uses.
+
+The tools hold no copy of the category list either. They read `GET /api/categories` on every
+call, the same way they ask which currency to report in, so an assistant is never offered a
+category the server has stopped recognising. That is guidance, not enforcement: a tool that
+was handed something unknown answers with the list that does exist, so the assistant can
+correct itself — but the backend refuses an invented category regardless, and going straight
+to `POST /api/expenses` with one still returns a 400.
 
 To connect it, build it and point your MCP client at the compiled entry point:
 
@@ -218,8 +236,9 @@ DELETE /api/expenses/:id
 GET    /api/analytics/summary   month to date, vs the same days last month
 GET    /api/analytics/categories
 GET    /api/analytics/trend     weekly buckets
-GET    /api/settings            the base currency, and what it can be changed to
-PATCH  /api/settings            change it; relabels rows already in it, converts the rest
+GET    /api/categories          the categories that currently exist
+GET    /api/settings            the currency, whether it was chosen, and the ISO list
+PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
 POST   /api/ai/monthly-summary  this month in a sentence or two, saves nothing
 ```
