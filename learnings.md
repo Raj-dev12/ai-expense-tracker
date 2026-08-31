@@ -1040,6 +1040,7 @@ want when someone asks you about the project in six months.
 | A rename onto an existing name is refused, not merged | "A category called Groceries already exists" | Merging is a different feature with its own questions — what happens to the counts, whether it can be undone — and guessing at one of those answers is worse than declining. A case-only rename is still allowed, because that is the same row. |
 | Uncategorised cannot be renamed either | Alongside the existing rule that it cannot be deleted | The delete flow moves expenses there *by name*, and the parse endpoint falls back to it by name. Renaming it would break both, silently, at the moment somebody next deleted a category. |
 | The expense list loads everything in one request | `limit=200`, scrolling inside a fixed height | A hundred rows is nothing to fetch or draw, and paging would add a scroll listener, a loading state and an off-by-one to save work that is already free. The fixed height is the load-bearing part: an unbounded list pushes the charts and the categories panel off the bottom of the page. The header still says "showing 200 of 500" when the cap bites, because a list that quietly dropped rows would be worse than one that admits it. |
+| A check script owns its writes until they are gone | The MCP check sweeps in a `finally`, and again at startup | It writes to a real database. A run that died between creating its rows and deleting them left them behind, and the next run failed a check about a mess it had not made — a worse failure than the original, because it points at the wrong thing. The finally covers a throw; the startup sweep covers the process being killed, which no finally survives. The marker lives in the data (`Tool check` in the merchant name) rather than in a variable, so a crash cannot lose track of what to remove. |
 
 ---
 
@@ -2512,3 +2513,56 @@ the filter following. Renamed it back. A clash, an attempt on Uncategorised, and
 name are each refused with their own message; a case-only rename is allowed. The list returns
 97 of 97 in one request. 67 backend tests, three typechecks, all render checks including eight
 new or rewritten ones, all seven MCP tools over stdio.
+
+### Session 23 — a check script that cleans up after its own failure
+
+**The problem, noticed two sessions ago**
+
+The MCP check writes to a real database: it adds two expenses, exercises the tools against
+them, and deletes them at the end. A run crashed halfway once — after the creates, before the
+deletes — and left both rows behind. The *next* run then failed its final "the test rows are
+gone again" check, reporting a mess it had not made.
+
+That is a worse failure than the original, because it points at the wrong thing. A check that
+lies about which run broke costs more than the check is worth.
+
+**Two sweeps, because a finally cannot cover everything**
+
+```
+sweep()  →  try { ...every check... }  finally { sweep() }
+```
+
+The `finally` handles a check that throws, which is the case that actually happened. The
+sweep at the *start* handles the case a finally cannot: the process being killed outright,
+which no amount of error handling inside it will survive.
+
+The sweep goes at the HTTP API directly rather than through the MCP tools, deliberately. It
+has to work when the thing under test is broken, and that is precisely the situation where
+cleanup matters most.
+
+Every row the script creates carries `Tool check` in its merchant name, so finding them again
+needs no bookkeeping that a crash could lose — the marker is in the data, not in a variable.
+
+**Proved by breaking it on purpose**
+
+Asserting this works by reading it is not enough, because the failure path is the entire
+point. So a `throw` was inserted immediately after the two rows are created:
+
+```
+Error: DELIBERATE FAILURE to prove the cleanup runs
+    at src/tool-check.ts:180
+
+did it leave anything behind?
+  none — cleanup survived the throw
+```
+
+And the startup sweep was proved the same way, by planting two stray rows by hand and
+watching the next run announce `(cleared 2 rows left behind by an earlier run)` before doing
+anything else.
+
+**The general shape**
+
+**A script that writes to a shared database owns those writes until they are gone.** Not
+until the happy path finishes. The cleanup belongs in a `finally`, and anything a `finally`
+cannot reach needs a way to be found later — which means the marker lives in the data rather
+than in memory.

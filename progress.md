@@ -114,6 +114,8 @@ Asked for after the build plan was written, and built on request rather than sug
       transaction, with the count shown first
 - [x] The expense list shows all of them in one request, scrolling inside a fixed height
       rather than growing the page
+- [x] The MCP check script cleans up after itself even when it throws: a sweep in a finally,
+      and another at startup for the case a finally cannot cover — proved by sabotaging it
 
 ## Finishing
 
