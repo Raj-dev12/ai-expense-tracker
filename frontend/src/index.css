@@ -7,3 +7,32 @@
   --color-accent-strong: oklch(0.45 0.14 252);
   --color-accent-soft: oklch(0.96 0.02 252);
 }
+
+/*
+  Chart colours, kept apart from the interface palette above.
+
+  These are the first six slots of a validated categorical palette, in a fixed
+  order that is itself the colourblind-safety mechanism — the order was checked,
+  not chosen by eye. Assigning them in order and never cycling is what keeps
+  adjacent slices distinguishable.
+
+  Checked against the white card these are drawn on: every slot passes the
+  lightness, chroma and separation gates. Aqua, yellow and magenta fall below
+  3:1 contrast against white, which is why the legend always shows the category
+  name and its amount as text — colour never carries the meaning on its own.
+
+  The project is deliberately light-only, so there is no dark variant.
+*/
+:root {
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+
+  --chart-surface: #ffffff;
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
+  --chart-muted: #898781;
+}

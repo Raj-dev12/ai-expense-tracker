@@ -2,14 +2,25 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
   createExpense,
+  getCategories,
+  getSummary,
+  getTrend,
   listExpenses,
   parseExpense,
+  type CategoryBreakdown,
   type Expense,
   type NewExpense,
   type ParseResponse,
+  type Summary,
+  type Trend,
 } from "./api";
+import { CategoryPie } from "./components/CategoryPie";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
+import { SummaryCards } from "./components/SummaryCards";
+import { TrendChart } from "./components/TrendChart";
+
+const RECENT_COUNT = 10;
 
 export default function App() {
   const [sentence, setSentence] = useState("");
@@ -29,23 +40,44 @@ export default function App() {
   const [reviewId, setReviewId] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState<Expense | null>(null);
+
   const [recent, setRecent] = useState<Expense[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [categories, setCategories] = useState<CategoryBreakdown | null>(null);
+  const [trend, setTrend] = useState<Trend | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-  const refreshRecent = useCallback(async () => {
+  /**
+   * Everything the dashboard shows, refetched together.
+   *
+   * The four requests go out at once rather than one after another: they do not
+   * depend on each other, and waiting for each in turn would make saving an
+   * expense feel four times slower than it is.
+   */
+  const refresh = useCallback(async () => {
     try {
-      const result = await listExpenses(5);
-      setRecent(result.expenses);
-      setTotal(result.total);
-    } catch {
-      // A failed refresh should not bury whatever else is on screen; the list
-      // simply stays as it was.
+      const [list, nextSummary, nextCategories, nextTrend] = await Promise.all([
+        listExpenses(RECENT_COUNT),
+        getSummary(),
+        getCategories(),
+        getTrend(),
+      ]);
+      setRecent(list.expenses);
+      setTotal(list.total);
+      setSummary(nextSummary);
+      setCategories(nextCategories);
+      setTrend(nextTrend);
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Could not load your expenses");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => {
-    void refreshRecent();
-  }, [refreshRecent]);
+    void refresh();
+  }, [refresh]);
 
   async function handleParse(event: React.FormEvent) {
     event.preventDefault();
@@ -78,7 +110,7 @@ export default function App() {
       setJustSaved(saved);
       setReview(null);
       setSentence("");
-      await refreshRecent();
+      await refresh();
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -97,7 +129,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <main className="mx-auto max-w-2xl space-y-12 px-6 py-16">
+      <main className="mx-auto max-w-4xl space-y-10 px-6 py-14">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">Expense tracker</h1>
           <p className="text-slate-500">
@@ -149,9 +181,22 @@ export default function App() {
           </section>
         )}
 
-        <section>
-          <RecentExpenses expenses={recent} total={total} />
-        </section>
+        {!loaded ? (
+          <p className="py-16 text-center text-sm text-slate-400">Loading your expenses...</p>
+        ) : (
+          <>
+            {summary && <SummaryCards summary={summary} />}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {categories && (
+                <CategoryPie categories={categories.categories} from={categories.from} />
+              )}
+              {trend && <TrendChart points={trend.points} />}
+            </div>
+
+            <RecentExpenses expenses={recent} total={total} />
+          </>
+        )}
       </main>
     </div>
   );

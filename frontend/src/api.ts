@@ -152,3 +152,58 @@ export function createExpense(expense: NewExpense): Promise<Expense> {
 export function listExpenses(limit = 5): Promise<{ expenses: Expense[]; total: number }> {
   return request(`/api/expenses?limit=${limit}`, expenseListSchema);
 }
+
+// --- analytics ---------------------------------------------------------------
+
+const summarySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  daysElapsed: z.number(),
+  totalEur: z.string(),
+  count: z.number(),
+  dailyAverageEur: z.string(),
+  previous: z.object({
+    from: z.string(),
+    to: z.string(),
+    totalEur: z.string(),
+    count: z.number(),
+  }),
+  // Null when there is nothing to compare against, which is different from a
+  // change of zero, and the cards say so differently.
+  changePercent: z.number().nullable(),
+});
+
+const categoryBreakdownSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  categories: z.array(
+    z.object({ category: z.string(), totalEur: z.string(), count: z.number() }),
+  ),
+});
+
+const trendSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  bucket: z.string(),
+  points: z.array(
+    z.object({ weekStart: z.string(), totalEur: z.string(), count: z.number() }),
+  ),
+});
+
+export type Summary = z.infer<typeof summarySchema>;
+export type CategoryBreakdown = z.infer<typeof categoryBreakdownSchema>;
+export type Trend = z.infer<typeof trendSchema>;
+export type CategorySlice = CategoryBreakdown["categories"][number];
+export type TrendPoint = Trend["points"][number];
+
+export function getSummary(): Promise<Summary> {
+  return request("/api/analytics/summary", summarySchema);
+}
+
+export function getCategories(): Promise<CategoryBreakdown> {
+  return request("/api/analytics/categories", categoryBreakdownSchema);
+}
+
+export function getTrend(): Promise<Trend> {
+  return request("/api/analytics/trend", trendSchema);
+}

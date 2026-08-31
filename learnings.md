@@ -213,6 +213,50 @@ value is only read the first time that component appears. Give it a key that cha
 treats it as a new component, which resets those fields. This is the documented way to reset a
 component's state, and it is the fix for the bug described in session 6.
 
+**Categorical palette**
+A fixed list of colours used to tell things apart — one per category — as opposed to a scale
+used to show how much of something there is. The *order* matters and is not cosmetic: it is
+chosen so that colours sitting next to each other stay distinguishable to someone with colour
+blindness. Ours is a validated set whose first six slots are assigned in order and never
+cycled. Adding a seventh by inventing a colour would break the property the order exists to
+guarantee, which is why extra categories fold into "Other" instead.
+
+**Contrast, and why the legend writes everything out**
+Three of our six chart colours are too light to clear the usual contrast threshold against a
+white card. That is allowed for a *mark* — a filled slice is large and its shape carries it —
+but only on the condition that the meaning is also available as text. So the legend always
+shows the category name and its amount. Colour never carries information on its own here, and
+every value on the page can be read without hovering over anything.
+
+**Stat tile**
+A single number shown as a number, with a label. Four of them sit above the charts. The
+temptation is to draw everything, but one figure is best drawn as itself — a chart of one
+value is a decoration wrapped around a number.
+
+**Part-to-whole**
+The question "how does this total split up", which is what a pie chart answers. It works at a
+glance for about six segments; past that, adjacent slices blur and the answer is better given
+as a table. Nine categories is past that, which is why ours folds.
+
+**Container query (and why a breakpoint is not one)**
+An ordinary responsive breakpoint like `sm:` asks how wide the *window* is. A container query
+asks how wide *this element's container* is. They are not interchangeable, and confusing them
+produces a bug that gets worse on bigger screens: our pie legend asked `sm:` to decide whether
+to sit beside the pie, but on a wide screen the two charts move into a two-column grid, so the
+card gets *narrower* exactly when the window gets wider. The card was 416px, the pie took 208
+of them, and the names were crushed to nothing.
+
+The rule: if the question is "does this fit here", only the container can answer it. Reach for
+a breakpoint only when the question really is about the window.
+
+**Truncation hides bugs**
+`truncate` clips text that does not fit and adds an ellipsis. It looks tidy and it is
+dangerous, because it turns "this layout is broken" into "this label is short" — nothing
+errors, nothing warns, and the page looks deliberate. The pie legend showed "B" for "Bills"
+for a whole session. Clipping is right for genuinely unbounded text, like a shop name typed by
+a person; it is wrong for a fixed vocabulary of nine known words, where not fitting means the
+layout is wrong and should be fixed rather than concealed.
+
 ---
 
 ## 5. Terms: the backend
@@ -824,6 +868,11 @@ want when someone asks you about the project in six months.
 | Empty weeks in the trend | Sent as zero points rather than left out | A missing week is not a gap in a line chart — it is a straight line drawn across it, which reads as steady spending during a week when there was none. Sending the zero is the only way the chart can tell the truth. |
 | Analytics totals | Strings, like every other amount | The database adds `numeric` columns exactly. Converting to a JavaScript number in the response would throw that away at the last step, after using a decimal column specifically to avoid it. The browser converts when it draws. |
 | Unknown query parameters | Rejected with a 400 rather than ignored | `?form=2026-08-01` is a typo, and silently ignoring it produces a chart that looks fine and answers a different question. This is the failure mode where someone stares at a filter wondering why it did nothing. |
+| Chart colours | A validated categorical palette, first six slots in fixed order, never cycled | The order is the colourblind-safety mechanism rather than a matter of taste — it was checked with a validator against the actual white card the charts sit on, not chosen by eye. Three of the six fall below the contrast threshold on white, which is allowed for a filled slice only because the legend also writes out the name and the amount. |
+| Pie segments | At most six; everything smaller folds into one "Other" slice | A pie is only readable at a glance to about six segments. Nine categories would be a table pretending to be a chart. If a real "Other" is already among the largest, the remainder merges into it rather than drawing two slices with the same name. |
+| Empty weeks on the line | Drawn as zero points | The same reason the endpoint sends them: a missing week is not a gap, it is a straight line drawn across one, which reads as steady spending during a week when there was none. |
+| The month-on-month figure | Shown with an arrow and a sentence, in ordinary ink — never green or red | Spending more than last month is not automatically bad; it might be a holiday, or rent landing in a different week. Colouring it red would be the interface drawing a conclusion the data does not support. It says what happened and leaves the judgement to the person reading. |
+| Legend layout | A container query, not a viewport breakpoint, and nothing truncates | The card is narrower on a *wide* screen, because the two charts move into a two-column grid there — so a viewport breakpoint answers the wrong question, and answers it confidently. Names are a fixed vocabulary of nine short words: if one does not fit, the layout is wrong and gets more room, rather than being clipped into looking deliberate. |
 
 ---
 
@@ -1385,3 +1434,97 @@ window with no expenses returns zeroes and an empty list rather than an error.
 
 The frontend half of hour 3: summary cards, the Recharts pie and trend line, and replacing
 the stub recent list with the real one.
+
+### Session 10 — the dashboard
+
+The rest of hour 3: the summary cards, the two charts, and the real recent list in place of the
+stub.
+
+**What got built**
+
+- Four stat tiles: spent this month, number of expenses, daily average, and the comparison
+  with the same stretch of last month.
+- A category pie, folding to at most six slices, with a legend that carries every name, amount
+  and share as text.
+- A weekly trend line across three months, one series, no legend — the heading names it — with
+  the busiest week called out in the subheading rather than a number printed on every point.
+- The recent list, now showing ten, with the original currency in small grey text when it was
+  not euros, and "added by mcp" or "added by seed" on rows that did not come from the page.
+
+**Decisions worth remembering**
+
+- The chart palette was run through a validator against the white card it actually sits on,
+  rather than picked by eye. See [[categorical-palette]] and
+  [[contrast-and-why-the-legend-writes-everything-out]].
+- The comparison figure is not coloured green or red. See the decisions table.
+- The four dashboard requests go out together rather than one after another. They do not depend
+  on each other, and waiting for each in turn would make saving an expense feel four times
+  slower than it is.
+
+**Caught while building**
+
+- A delete button went into the recent list before it was noticed that nothing had asked for
+  one. It was removed: adding an unrequested destructive action to a list is exactly the kind
+  of thing that should not appear on its own.
+- A stray invisible character ended up inside the trend chart file and would have failed the
+  build with a confusing message. Worth knowing that "the code looks fine" and "the file
+  contains only what you think it does" are different claims.
+
+**Verified**
+
+- 41 render checks, covering every card, the fold from nine categories to six, the legend
+  writing values out, the empty-month message, and the list showing the original currency only
+  when it was not euros.
+- The full browser cycle still passes against the real backend.
+- The page draws real figures: 1836.95 euros across 31 expenses, eight categories folded to
+  six, fourteen weekly points.
+
+**Not verified**
+
+How it looks. There are still no browser tools available, so the layout, spacing and the
+charts themselves have not been seen by anyone. That is the next thing to check.
+
+### Session 11 — the pie legend showed one letter per category
+
+Reported from the browser: every category name in the pie legend was cut to its first letter.
+"Bills" rendered as "B". The legend is the whole reason the low-contrast palette was
+acceptable, so the chart was conveying nothing readable.
+
+**What was wrong**
+
+The legend asked `sm:flex-row` — a *viewport* breakpoint — to decide whether it should sit
+beside the pie. On a wide screen that fires. But on a wide screen the two charts also move into
+a two-column grid, so the card is simultaneously *narrower*: 416px wide, 368px inside its
+padding, 208px of that taken by the pie, leaving 136px for a row needing about 152px before the
+name gets any width at all. The name was squeezed to zero and `truncate` clipped it to a
+letter.
+
+Two mistakes, and the second is what made it invisible:
+
+- A viewport breakpoint was used to answer a question about a container. See
+  [[container-query-and-why-a-breakpoint-is-not-one]].
+- `truncate` turned a broken layout into something that looked deliberate. See
+  [[truncation-hides-bugs]].
+
+**Why 41 render checks passed while this was happening**
+
+They were right, and they were looking at the wrong thing. `renderToStaticMarkup` produces an
+HTML *string*: "Bills" was in it, exactly as asserted. CSS truncation happens during layout, in
+a browser, at paint time — and nothing in the check script performs layout. There are no
+widths, no boxes and no overflow in a string, so the question "is this visible" cannot be asked
+there at all.
+
+This is worth stating plainly rather than fixing: **the render checks verify content, never
+appearance.** No number of extra assertions changes that. The script now says so at the top,
+and carries two structural guards — the legend must not truncate, and the layout must use a
+container query — which are a tripwire for this exact bug class, not proof that anything looks
+right.
+
+The general lesson: a green check suite is evidence about whatever the checks can see. Knowing
+what they *cannot* see is part of reading the result.
+
+**Still only checkable by eye**
+
+Everything visual. The arithmetic says the legend now stacks below the pie whenever the card is
+under 576px and sits beside it above that, which covers both the two-column grid and the
+full-width case — but arithmetic is not a screenshot.

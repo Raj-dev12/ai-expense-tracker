@@ -1,54 +1,60 @@
 import type { Expense } from "../api";
-
-const euros = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" });
+import { formatDayMonth, formatEur } from "../format";
 
 /**
- * A short list of what is actually in the database.
+ * The most recent expenses, newest first.
  *
- * This is a placeholder for the full recent-expenses section that comes with the
- * rest of the page. It exists now so that pressing save has a visible
- * consequence — otherwise there is no way to see that the confirm step really
- * wrote anything.
+ * `source` is shown when a row did not come from this page, because being able
+ * to point at a row and say an outside assistant wrote that one is the whole
+ * reason the column exists.
  */
-export function RecentExpenses({ expenses, total }: { expenses: Expense[]; total: number }) {
-  if (expenses.length === 0) {
-    return <p className="text-sm text-slate-400">Nothing saved yet.</p>;
-  }
-
+export function RecentExpenses({
+  expenses,
+  total,
+}: {
+  expenses: Expense[];
+  total: number;
+}) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-medium text-slate-900">Recently added</h2>
-        <span className="text-xs text-slate-400">{total} in total</span>
-      </div>
+    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
+      <header className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-base font-medium text-slate-900">Recent expenses</h2>
+        <span className="text-xs text-slate-400">
+          showing {expenses.length} of {total}
+        </span>
+      </header>
 
-      <ul className="divide-y divide-slate-100">
-        {expenses.map((expense) => (
-          <li key={expense.id} className="flex items-baseline gap-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm text-slate-900">
-                {expense.merchant ?? expense.description ?? "Unnamed expense"}
-              </p>
-              <p className="text-xs text-slate-400">
-                {expense.category} · {expense.expenseDate}
-                {expense.source !== "web" && ` · via ${expense.source}`}
-              </p>
-            </div>
-
-            <div className="text-right">
-              <p className="text-sm tabular-nums text-slate-900">
-                {euros.format(Number(expense.amountEur))}
-              </p>
-              {/* The original currency, shown quietly, only when it was not euros. */}
-              {expense.currency !== "EUR" && (
-                <p className="text-xs tabular-nums text-slate-400">
-                  {expense.amount} {expense.currency}
+      {expenses.length === 0 ? (
+        <p className="py-10 text-center text-sm text-slate-400">Nothing saved yet.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {expenses.map((expense) => (
+            <li key={expense.id} className="flex items-baseline gap-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-slate-900">
+                  {expense.merchant ?? expense.description ?? "Unnamed expense"}
                 </p>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
+                <p className="truncate text-xs text-slate-400">
+                  {expense.category} · {formatDayMonth(expense.expenseDate)}
+                  {expense.source !== "web" && ` · added by ${expense.source}`}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-sm tabular-nums text-slate-900">
+                  {formatEur(expense.amountEur)}
+                </p>
+                {/* The original currency, quietly, and only when it was not euros. */}
+                {expense.currency !== "EUR" && (
+                  <p className="text-xs tabular-nums text-slate-400">
+                    {expense.amount} {expense.currency}
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

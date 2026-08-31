@@ -39,11 +39,10 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 - [x] Natural-language add box
 - [x] Interpretation shown as editable chips before saving
 - [x] Confirm button saves via the validated endpoint
-- [ ] Summary cards
-- [ ] Category pie chart
-- [ ] Three-month trend line
-- [~] Recent expenses list, original currency shown when not EUR — a short list is in
-      place so that saving has a visible result; the full section comes with the charts
+- [x] Summary cards
+- [x] Category pie chart
+- [x] Three-month trend line
+- [x] Recent expenses list, original currency shown when not EUR
 
 ## Hour 4 — MCP and exchange rates
 
