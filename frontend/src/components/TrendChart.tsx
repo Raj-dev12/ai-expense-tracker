@@ -8,11 +8,19 @@ import {
   YAxis,
 } from "recharts";
 import type { TrendPoint } from "../api";
-import { formatDayMonth, formatEur, formatEurShort } from "../format";
+import { formatDayMonth, formatMoney, formatMoneyShort } from "../format";
 
 type Point = TrendPoint & { total: number };
 
-function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: Point }> }) {
+function ChartTooltip({
+  active,
+  payload,
+  currency,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: Point }>;
+  currency: string;
+}) {
   const point = active ? payload?.[0]?.payload : undefined;
   if (!point) return null;
 
@@ -22,7 +30,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
         Week of {formatDayMonth(point.weekStart)}
       </p>
       <p className="text-slate-500">
-        {formatEur(point.totalEur)} · {point.count}{" "}
+        {formatMoney(point.totalBase, currency)} · {point.count}{" "}
         {point.count === 1 ? "expense" : "expenses"}
       </p>
     </div>
@@ -39,8 +47,14 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
  *
  * One series, so there is no legend — the heading names it.
  */
-export function TrendChart({ points }: { points: TrendPoint[] }) {
-  const data: Point[] = points.map((point) => ({ ...point, total: Number(point.totalEur) }));
+export function TrendChart({
+  points,
+  currency,
+}: {
+  points: TrendPoint[];
+  currency: string;
+}) {
+  const data: Point[] = points.map((point) => ({ ...point, total: Number(point.totalBase) }));
   const busiest = data.reduce<Point | null>(
     (best, point) => (best === null || point.total > best.total ? point : best),
     null,
@@ -76,14 +90,14 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
               minTickGap={24}
             />
             <YAxis
-              tickFormatter={formatEurShort}
+              tickFormatter={(value: number) => formatMoneyShort(value, currency)}
               tick={{ fill: "var(--chart-muted)", fontSize: 11 }}
               tickLine={false}
               axisLine={false}
               width={56}
             />
             <Tooltip
-              content={<ChartTooltip />}
+              content={<ChartTooltip currency={currency} />}
               cursor={{ stroke: "var(--chart-axis)", strokeWidth: 1 }}
             />
             <Line

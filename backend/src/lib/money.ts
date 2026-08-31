@@ -9,3 +9,18 @@ export function toMoneyString(value: number): string {
   // during earlier arithmetic, so 1.005 rounds up rather than down.
   return (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2);
 }
+
+/**
+ * An amount written the way a person would read it, in a given currency.
+ *
+ * Used by the mock parser and the summary prompt, both of which produce prose
+ * rather than stored values. Nothing here goes into the database — the stored
+ * form is always the exact decimal string from toMoneyString above.
+ */
+export function formatMoney(value: number, currency: string): string {
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
+}

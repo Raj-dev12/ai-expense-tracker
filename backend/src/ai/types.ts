@@ -46,10 +46,12 @@ export type MonthlySummaryRequest = {
    * the readable form. The ISO date is what the HTTP response carries.
    */
   month: string;
-  totalEur: number;
+  /** Which currency the figures below are in, so the sentence can name it. */
+  baseCurrency: string;
+  totalBase: number;
   expenseCount: number;
-  byCategory: ReadonlyArray<{ category: string; totalEur: number }>;
-  previousMonthTotalEur: number | null;
+  byCategory: ReadonlyArray<{ category: string; totalBase: number }>;
+  previousMonthTotalBase: number | null;
 };
 
 /**

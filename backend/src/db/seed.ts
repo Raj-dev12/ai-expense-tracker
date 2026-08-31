@@ -220,7 +220,7 @@ async function main() {
         userId: user.id,
         amount: toMoneyString(amount),
         currency: "EUR",
-        amountEur: toMoneyString(amount),
+        amountBase: toMoneyString(amount),
         merchant: merchant.name,
         category: plan.category,
         description: pick(merchant.notes),
@@ -238,7 +238,7 @@ async function main() {
       // The fixed table on purpose: a seed that fetched live rates would put
       // different euro amounts in the database every day, which would undo the
       // point of seeding from a fixed random seed.
-      amountEur: toMoneyString(convertWithStaticRate(item.amount, item.currency).amountEur),
+      amountBase: toMoneyString(convertWithStaticRate(item.amount, item.currency).amountBase),
       merchant: item.merchant,
       category: item.category,
       description: item.note,

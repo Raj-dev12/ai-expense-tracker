@@ -6,6 +6,7 @@ import { aiRoutes } from "./routes/ai.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { healthRoutes } from "./routes/health.js";
+import { settingsRoutes } from "./routes/settings.js";
 
 const app = Fastify({ logger: true });
 
@@ -40,6 +41,7 @@ await app.register(healthRoutes);
 await app.register(expenseRoutes);
 await app.register(aiRoutes);
 await app.register(analyticsRoutes);
+await app.register(settingsRoutes);
 
 // Docker containers need 0.0.0.0 rather than localhost, or nothing outside the
 // container can reach the server.

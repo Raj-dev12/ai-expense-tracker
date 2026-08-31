@@ -6,6 +6,7 @@ import {
   findMerchant,
   removeFirst,
 } from "./extract.js";
+import { formatMoney } from "../lib/money.js";
 import type {
   ExpenseParser,
   MonthlySummaryRequest,
@@ -92,28 +93,29 @@ export const mockParser: ExpenseParser = {
   },
 
   async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
-    const { month, totalEur, expenseCount, byCategory, previousMonthTotalEur } = request;
+    const { month, baseCurrency, totalBase, expenseCount, byCategory, previousMonthTotalBase } =
+      request;
 
     if (expenseCount === 0) {
       return { summary: `No expenses recorded in ${month}.`, producedBy: "mock" };
     }
 
-    const ranked = [...byCategory].sort((a, b) => b.totalEur - a.totalEur);
+    const ranked = [...byCategory].sort((a, b) => b.totalBase - a.totalBase);
     const biggest = ranked[0];
     const sentences: string[] = [
-      `In ${month} you spent €${totalEur.toFixed(2)} across ${expenseCount} expenses.`,
+      `In ${month} you spent ${formatMoney(totalBase, baseCurrency)} across ${expenseCount} expenses.`,
     ];
 
     if (biggest) {
-      const share = totalEur > 0 ? Math.round((biggest.totalEur / totalEur) * 100) : 0;
+      const share = totalBase > 0 ? Math.round((biggest.totalBase / totalBase) * 100) : 0;
       sentences.push(
-        `${biggest.category} was the largest category at €${biggest.totalEur.toFixed(2)}, about ${share}% of the total.`,
+        `${biggest.category} was the largest category at ${formatMoney(biggest.totalBase, baseCurrency)}, about ${share}% of the total.`,
       );
     }
 
-    if (previousMonthTotalEur !== null && previousMonthTotalEur > 0) {
-      const difference = totalEur - previousMonthTotalEur;
-      const percent = Math.abs(Math.round((difference / previousMonthTotalEur) * 100));
+    if (previousMonthTotalBase !== null && previousMonthTotalBase > 0) {
+      const difference = totalBase - previousMonthTotalBase;
+      const percent = Math.abs(Math.round((difference / previousMonthTotalBase) * 100));
       sentences.push(
         difference >= 0
           ? `That is ${percent}% more than the month before.`

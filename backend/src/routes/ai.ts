@@ -3,7 +3,7 @@ import { getParser } from "../ai/index.js";
 import { monthLabel, todayIso } from "../lib/dates.js";
 import { categoryTotalsBetween, monthToDate } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
-import { getDemoUserId } from "../lib/user.js";
+import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import {
   monthlySummaryRequestSchema,
@@ -70,24 +70,25 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/ai/monthly-summary", async (request) => {
     validate(monthlySummaryRequestSchema, request.body ?? {}, "request");
 
-    const userId = await getDemoUserId();
+    const { id: userId, baseCurrency } = await getDemoUser();
     const figures = await monthToDate(userId);
     const categories = await categoryTotalsBetween(userId, figures.from, figures.to);
 
     const parser = getParser();
     const result = await parser.summarizeMonth({
       month: monthLabel(figures.from),
+      baseCurrency,
       // The parser is handed numbers rather than the decimal strings, because it
       // is writing a sentence rather than storing anything. Nothing is written
       // back from this call, so no precision reaches the database this way.
-      totalEur: Number(figures.totalEur),
+      totalBase: Number(figures.totalBase),
       expenseCount: figures.count,
       byCategory: categories.map((row) => ({
         category: row.category,
-        totalEur: Number(row.totalEur),
+        totalBase: Number(row.totalBase),
       })),
-      previousMonthTotalEur:
-        figures.previous.count > 0 ? Number(figures.previous.totalEur) : null,
+      previousMonthTotalBase:
+        figures.previous.count > 0 ? Number(figures.previous.totalBase) : null,
     });
 
     const checked = monthlySummaryResultSchema.safeParse(result);

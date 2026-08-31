@@ -1,6 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { CategorySlice } from "../api";
-import { formatEur, formatMonth } from "../format";
+import { formatMoney, formatMonth } from "../format";
 
 /**
  * The first six slots of the validated categorical palette, in order.
@@ -34,7 +34,7 @@ export function foldToSixSlices(categories: CategorySlice[]): CategorySlice[] {
   const kept = categories.slice(0, MAX_SLICES - 1);
   const folded = categories.slice(MAX_SLICES - 1);
 
-  const total = folded.reduce((sum, slice) => sum + Number(slice.totalEur), 0);
+  const total = folded.reduce((sum, slice) => sum + Number(slice.totalBase), 0);
   const count = folded.reduce((sum, slice) => sum + slice.count, 0);
 
   const existing = kept.findIndex((slice) => slice.category === "Other");
@@ -42,13 +42,13 @@ export function foldToSixSlices(categories: CategorySlice[]): CategorySlice[] {
     const current = kept[existing]!;
     kept[existing] = {
       category: "Other",
-      totalEur: (Number(current.totalEur) + total).toFixed(2),
+      totalBase: (Number(current.totalBase) + total).toFixed(2),
       count: current.count + count,
     };
     return kept;
   }
 
-  return [...kept, { category: "Other", totalEur: total.toFixed(2), count }];
+  return [...kept, { category: "Other", totalBase: total.toFixed(2), count }];
 }
 
 type Slice = CategorySlice & { colour: string; share: number };
@@ -56,9 +56,11 @@ type Slice = CategorySlice & { colour: string; share: number };
 function ChartTooltip({
   active,
   payload,
+  currency,
 }: {
   active?: boolean;
   payload?: Array<{ payload: Slice }>;
+  currency: string;
 }) {
   const slice = active ? payload?.[0]?.payload : undefined;
   if (!slice) return null;
@@ -67,7 +69,7 @@ function ChartTooltip({
     <div className="rounded-lg bg-white px-3 py-2 text-sm shadow-lg ring-1 ring-slate-200">
       <p className="font-medium text-slate-900">{slice.category}</p>
       <p className="text-slate-500">
-        {formatEur(slice.totalEur)} · {slice.share}% · {slice.count}{" "}
+        {formatMoney(slice.totalBase, currency)} · {slice.share}% · {slice.count}{" "}
         {slice.count === 1 ? "expense" : "expenses"}
       </p>
     </div>
@@ -77,17 +79,19 @@ function ChartTooltip({
 export function CategoryPie({
   categories,
   from,
+  currency,
 }: {
   categories: CategorySlice[];
   from: string;
+  currency: string;
 }) {
   const slices = foldToSixSlices(categories);
-  const total = slices.reduce((sum, slice) => sum + Number(slice.totalEur), 0);
+  const total = slices.reduce((sum, slice) => sum + Number(slice.totalBase), 0);
 
   const data: Slice[] = slices.map((slice, index) => ({
     ...slice,
     colour: SERIES[index] ?? SERIES[SERIES.length - 1]!,
-    share: total > 0 ? Math.round((Number(slice.totalEur) / total) * 100) : 0,
+    share: total > 0 ? Math.round((Number(slice.totalBase) / total) * 100) : 0,
   }));
 
   return (
@@ -121,7 +125,7 @@ export function CategoryPie({
                 <PieChart>
                   <Pie
                     data={data}
-                    dataKey={(slice: Slice) => Number(slice.totalEur)}
+                    dataKey={(slice: Slice) => Number(slice.totalBase)}
                     nameKey="category"
                     innerRadius="55%"
                     outerRadius="100%"
@@ -135,7 +139,7 @@ export function CategoryPie({
                       <Cell key={slice.category} fill={slice.colour} />
                     ))}
                   </Pie>
-                  <Tooltip content={<ChartTooltip />} />
+                  <Tooltip content={<ChartTooltip currency={currency} />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -162,7 +166,7 @@ export function CategoryPie({
                   />
                   <span className="min-w-0 flex-1 text-slate-700">{slice.category}</span>
                   <span className="shrink-0 tabular-nums text-slate-900">
-                    {formatEur(slice.totalEur)}
+                    {formatMoney(slice.totalBase, currency)}
                   </span>
                   <span className="w-10 shrink-0 text-right text-xs tabular-nums text-slate-400">
                     {slice.share}%

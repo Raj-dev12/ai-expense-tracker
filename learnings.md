@@ -1001,6 +1001,15 @@ want when someone asks you about the project in six months.
 | One row edits at a time | The open row is an id held by the page, not a flag per row | Two half-finished edits on screen are two chances to lose typing by clicking away, and nobody edits two expenses in parallel. |
 | The chips moved into their own component | `ExpenseFields`, used by the confirm step and the editor | The two screens need the same six fields under the same rules. Two copies would drift — a currency added to one list and not the other, a date limit enforced when creating but not when correcting. |
 | `update_expense` is marked destructive | `destructiveHint: true`, like delete | MCP's hint asks whether a tool is additive or overwrites. An update overwrites, and the previous value is not recoverable, so a client that confirms destructive calls should confirm this one. |
+| The base currency is stored, not configured | Read from `users.base_currency`, changed through an endpoint | The column existed from hour 1 and had never been read once. An environment variable would have made it a deployment decision rather than a person's, and would still have been a single hardcoded answer — just written somewhere else. |
+| `amount_eur` became `amount_base` | Renamed in the schema, a migration, every API response, the frontend and the MCP tools | A column called `amount_eur` holding pounds is a lie that every future reader has to be warned about. The rename is the whole reason the feature is safe to build on. |
+| The rename migration was written by hand | `ALTER TABLE ... RENAME COLUMN`, not generated | drizzle-kit cannot tell a rename from a drop-and-add without asking interactively, and the answer it guesses would throw away every stored figure. A RENAME keeps the data where it is and only touches the catalogue. |
+| ECB rates stay euro-pivoted | `STATIC_EUR_RATES` keeps its name and its shape; cross rates divide through the euro | It is the shape the real data arrives in — the European Central Bank publishes against the euro. Converting SEK to GBP by going through EUR is what a cross rate is, not a workaround. |
+| Switching the base relabels rows already in it | A 42 EUR row stays 42 and reads as £42 | There is no rate that makes £42 the correct reading of something recorded as plain 42: no conversion ever happened for that row. Converting it would invent a number the records never held. The control says this in as many words, because a total that changes silently is worse than one that changes and explains itself. |
+| Genuinely foreign rows are recomputed through the existing path | `baseFigureFor`, shared with create and patch | Three callers now answer "what is this worth in the base currency", and a second implementation living in the settings route is exactly how two of them end up disagreeing. |
+| The MCP server asks for the base every call | `baseCurrency()` before formatting, never cached | It is a setting a person can change in the browser mid-conversation. An assistant confidently reporting euros after a switch to pounds is wrong in the one way that matters, and the extra request is cheap beside the one the tool is already making. |
+| Rows are recomputed one at a time | A loop, not `Promise.all` | Each row needs the rate for its own date, and a demo's worth of rows would otherwise fire dozens of simultaneous requests at a free public service. Expenses cluster on the same handful of days, so the cache makes the repeats nearly free. |
+| The picker offers five currencies, not twelve | A short list beside the heading | A dropdown next to a heading is a glance-and-move-on control, and twelve options is a menu you have to read. An expense can still be *entered* in any of the twelve — a different question, which keeps its full list. |
 
 ---
 
@@ -2042,3 +2051,80 @@ third time in this project a check has needed more scepticism than the code did.
 
 There is still no delete button in the interface. Editing a row and removing one are
 different decisions, and only the first was asked for.
+
+### Session 17 — the base currency stops being a hardcoded euro
+
+**What changed**
+
+`users.base_currency` had existed since hour 1 and had never been read. It is read now:
+`GET /api/settings` reports it, `PATCH /api/settings` changes it, a picker sits at the top
+right of the page, and every number on screen reformats to match.
+
+The column `amount_eur` is now `amount_base`, renamed through the schema, a migration, every
+API response, the frontend and all seven MCP tools. A column called `amount_eur` holding
+pounds would be a lie that every future reader has to be warned about, and the rename is what
+makes the rest of the feature safe to build on.
+
+**Renaming a column without losing the data in it**
+
+drizzle-kit generates migrations by comparing snapshots, and a rename looks exactly like
+"drop one column, add another" unless it asks — which it cannot do in a non-interactive
+build. Guessing wrong here empties the column.
+
+So `0001_rename_amount_eur.sql` is one hand-written line:
+
+```sql
+ALTER TABLE "expenses" RENAME COLUMN "amount_eur" TO "amount_base";
+```
+
+plus an entry in `meta/_journal.json` so the migrator knows to run it. PostgreSQL only
+rewrites the catalogue for a rename, so it is instant and the data never moves. Applied to
+the running database with 98 rows in it; every figure came through unchanged.
+
+**Two kinds of row, and only one of them has a right answer**
+
+Switching the base does something different to each:
+
+| The row | What happens |
+|---|---|
+| recorded in the **old base** — `42 EUR` while the base was EUR | keeps its number, now reads as `£42` |
+| recorded in **another currency** — `30 GBP` holding a euro figure | recomputed at the rate for the day it was spent |
+
+The second has a right answer. The first does not: no conversion ever happened for that row,
+because it was already in the base, and there is no rate that makes `£42` the correct reading
+of something recorded as plain `42`. Converting it would invent a number the records never
+contained. So it is relabelled, and the control says so rather than letting the total change
+in silence.
+
+**The consequence, found by testing rather than by reasoning**
+
+Switching EUR → GBP and straight back does not return you to where you started. The
+£42.50 row held €49.72; under a GBP base it correctly became £42.50; switching back relabelled
+it as €42.50, because by then it was the row "already in the old base".
+
+That is the same rule applied twice, not a bug. But it means **the base is a decision rather
+than a toggle to play with**, and the README says so. The row was put back afterwards by
+patching its own amount, which forces a recompute through the normal path.
+
+**One definition of a derived column, now with three callers**
+
+`baseFigureFor` is what create, patch and the currency switch all call. Adding a fourth
+implementation inside the settings route was the obvious way to write it and is exactly how
+two of them would eventually disagree. The brief asked for the existing path to be reused,
+which was the right instinct.
+
+**Verified**
+
+- migration applied to the live database, 98 rows intact
+- switching to GBP: 95 relabelled, 3 recomputed — SEK 640 went from €56.32 to £49.30, CHF
+  28.40 from €29.82 to £26.44, and the £42.50 row became exactly £42.50 because it is now the
+  base and needs no conversion
+- 67 backend tests, three typechecks, all render checks including nine new ones that render
+  the same fixtures as pounds and assert no euro sign survives
+- all seven MCP tools over stdio, plus a new non-mutating check that the tools report in
+  whatever `/api/settings` says rather than a hardcoded symbol
+
+**Left in EUR**
+
+The database is back on EUR with its original figures, so the switch to GBP is there to be
+made in the browser rather than already done.

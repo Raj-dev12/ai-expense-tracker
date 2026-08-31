@@ -1,5 +1,5 @@
 import type { Expense, ExpensePatch } from "../api";
-import { formatDayMonth, formatEur } from "../format";
+import { formatDayMonth, formatMoney } from "../format";
 import { ExpenseEditor } from "./ExpenseEditor";
 
 /**
@@ -17,6 +17,7 @@ import { ExpenseEditor } from "./ExpenseEditor";
 export function RecentExpenses({
   expenses,
   total,
+  currency,
   editingId,
   savingEdit,
   editError,
@@ -26,6 +27,7 @@ export function RecentExpenses({
 }: {
   expenses: Expense[];
   total: number;
+  currency: string;
   editingId: string | null;
   savingEdit: boolean;
   editError: string | null;
@@ -84,10 +86,11 @@ export function RecentExpenses({
 
                 <div className="text-right">
                   <p className="text-sm tabular-nums text-slate-900">
-                    {formatEur(expense.amountEur)}
+                    {formatMoney(expense.amountBase, currency)}
                   </p>
-                  {/* The original currency, quietly, and only when it was not euros. */}
-                  {expense.currency !== "EUR" && (
+                  {/* The original currency, quietly, and only when it differs from
+                      the base everything is reported in. */}
+                  {expense.currency !== currency && (
                     <p className="text-xs tabular-nums text-slate-400">
                       {expense.amount} {expense.currency}
                     </p>

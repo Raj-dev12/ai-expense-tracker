@@ -8,6 +8,13 @@
       "when": 1788143881487,
       "tag": "0000_uneven_lester",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788184134704,
+      "tag": "0001_rename_amount_eur",
+      "breakpoints": true
     }
   ]
 }

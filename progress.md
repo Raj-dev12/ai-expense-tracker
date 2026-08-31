@@ -85,6 +85,9 @@ Asked for after the build plan was written, and built on request rather than sug
 - [x] Edit control on each row of the recent list, reusing the confirm step chips
 - [x] `update_expense` MCP tool, so an assistant can correct a row it added
 - [x] Verified: 67 backend tests, all render checks, all seven MCP tools over stdio
+- [x] Base currency is a setting, not a hardcoded EUR: `users.base_currency` is finally read,
+      `amount_eur` renamed to `amount_base` throughout, a picker at the top right, and a
+      `PATCH /api/settings` that relabels rows already in the old base and recomputes the rest
 
 ## Finishing
 

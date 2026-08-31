@@ -5,12 +5,14 @@ import {
   BackendError,
   CATEGORY_NAMES,
   CURRENCIES,
+  baseCurrency,
   call,
   categoryBreakdownSchema,
   deletedSchema,
   expenseListSchema,
   expenseSchema,
   formatExpense,
+  money,
   query,
   summarySchema,
   today,
@@ -71,7 +73,8 @@ server.registerTool(
     description:
       "Record a new expense. Use this when the person says they spent money on something and " +
       "wants it kept. The amount and the category are required; everything else is optional. " +
-      "Amounts in other currencies are converted to euros automatically, using the exchange " +
+      "Amounts in other currencies are converted to the base currency automatically, using " +
+      "the exchange " +
       "rate from the day it was spent, so pass the amount exactly as it was spent rather than " +
       "converting it yourself. Work out the date before calling: if they say 'yesterday', send " +
       "yesterday's date as YYYY-MM-DD. Leave the date out only if it happened today. This " +
@@ -91,6 +94,7 @@ server.registerTool(
   },
   async (args) => {
     try {
+      const base = await baseCurrency();
       const saved = await call("/api/expenses", expenseSchema, {
         method: "POST",
         body: JSON.stringify({
@@ -106,11 +110,11 @@ server.registerTool(
       });
 
       const converted =
-        saved.currency === "EUR"
+        saved.currency === base
           ? ""
           : ` (${saved.amount} ${saved.currency} converted at the rate for ${saved.expenseDate})`;
 
-      return text(`Saved: €${saved.amountEur}${converted} at ${saved.merchant ?? "an unnamed place"} on ${saved.expenseDate}, filed under ${saved.category}. Its id is ${saved.id}.`);
+      return text(`Saved: ${money(saved.amountBase, base)}${converted} at ${saved.merchant ?? "an unnamed place"} on ${saved.expenseDate}, filed under ${saved.category}. Its id is ${saved.id}.`);
     } catch (error) {
       return fail(error);
     }
@@ -127,7 +131,7 @@ server.registerTool(
       "meant; if more than one could match, show them and ask which. Send only the fields " +
       "being changed: anything left out keeps its current value, so to correct a shop name " +
       "you send the id and the merchant and nothing else. Send merchant or description as " +
-      "null to empty them. Changing the amount, the currency or the date re-converts the euro " +
+      "null to empty them. Changing the amount, the currency or the date re-converts the base " +
       "figure automatically using the rate for the day it was spent, so pass the amount as it " +
       "was actually spent rather than converting it yourself. This overwrites stored data and " +
       "cannot be undone, so only use it when the person has asked for a change.",
@@ -167,6 +171,7 @@ server.registerTool(
         Object.entries(changes).filter(([, value]) => value !== undefined),
       );
 
+      const base = await baseCurrency();
       const updated = await call(`/api/expenses/${id}`, expenseSchema, {
         method: "PATCH",
         body: JSON.stringify(patch),
@@ -174,12 +179,12 @@ server.registerTool(
 
       const fields = Object.keys(patch).join(", ");
       const converted =
-        updated.currency === "EUR"
+        updated.currency === base
           ? ""
           : ` (${updated.amount} ${updated.currency} converted at the rate for ${updated.expenseDate})`;
 
       return text(
-        `Updated ${fields}. It is now €${updated.amountEur}${converted} at ${updated.merchant ?? "an unnamed place"} on ${updated.expenseDate}, filed under ${updated.category}.`,
+        `Updated ${fields}. It is now ${money(updated.amountBase, base)}${converted} at ${updated.merchant ?? "an unnamed place"} on ${updated.expenseDate}, filed under ${updated.category}.`,
       );
     } catch (error) {
       return fail(error);
@@ -203,11 +208,12 @@ server.registerTool(
   },
   async (args) => {
     try {
+      const base = await baseCurrency();
       const { deleted } = await call(`/api/expenses/${args.id}`, deletedSchema, {
         method: "DELETE",
       });
       return text(
-        `Deleted €${deleted.amountEur} at ${deleted.merchant ?? "an unnamed place"} on ${deleted.expenseDate}.`,
+        `Deleted ${money(deleted.amountBase, base)} at ${deleted.merchant ?? "an unnamed place"} on ${deleted.expenseDate}.`,
       );
     } catch (error) {
       return fail(error);
@@ -252,10 +258,11 @@ server.registerTool(
 
       if (result.expenses.length === 0) return text("No expenses match that.");
 
-      const total = result.expenses.reduce((sum, e) => sum + Number(e.amountEur), 0);
+      const base = await baseCurrency();
+      const total = result.expenses.reduce((sum, e) => sum + Number(e.amountBase), 0);
       return text(
-        `${result.expenses.length} of ${result.total} matching expenses, €${total.toFixed(2)} in total:\n\n` +
-          result.expenses.map(formatExpense).join("\n"),
+        `${result.expenses.length} of ${result.total} matching expenses, ${money(total, base)} in total:\n\n` +
+          result.expenses.map((expense) => formatExpense(expense, base)).join("\n"),
       );
     } catch (error) {
       return fail(error);
@@ -296,10 +303,11 @@ server.registerTool(
         return text(`Nothing matches "${args.query}".`);
       }
 
-      const total = result.expenses.reduce((sum, e) => sum + Number(e.amountEur), 0);
+      const base = await baseCurrency();
+      const total = result.expenses.reduce((sum, e) => sum + Number(e.amountBase), 0);
       return text(
-        `${result.expenses.length} of ${result.total} expenses matching "${args.query}", €${total.toFixed(2)} in total:\n\n` +
-          result.expenses.map(formatExpense).join("\n"),
+        `${result.expenses.length} of ${result.total} expenses matching "${args.query}", ${money(total, base)} in total:\n\n` +
+          result.expenses.map((expense) => formatExpense(expense, base)).join("\n"),
       );
     } catch (error) {
       return fail(error);
@@ -332,14 +340,15 @@ server.registerTool(
         return text(`Nothing recorded between ${result.from} and ${result.to}.`);
       }
 
-      const total = result.categories.reduce((sum, c) => sum + Number(c.totalEur), 0);
+      const base = await baseCurrency();
+      const total = result.categories.reduce((sum, c) => sum + Number(c.totalBase), 0);
       const lines = result.categories.map((c) => {
-        const share = total > 0 ? Math.round((Number(c.totalEur) / total) * 100) : 0;
-        return `${c.category}: €${c.totalEur} (${share}%, ${c.count} ${c.count === 1 ? "expense" : "expenses"})`;
+        const share = total > 0 ? Math.round((Number(c.totalBase) / total) * 100) : 0;
+        return `${c.category}: ${money(c.totalBase, base)} (${share}%, ${c.count} ${c.count === 1 ? "expense" : "expenses"})`;
       });
 
       return text(
-        `Spending from ${result.from} to ${result.to}, €${total.toFixed(2)} in total:\n\n${lines.join("\n")}`,
+        `Spending from ${result.from} to ${result.to}, ${money(total, base)} in total:\n\n${lines.join("\n")}`,
       );
     } catch (error) {
       return fail(error);
@@ -360,16 +369,17 @@ server.registerTool(
   },
   async () => {
     try {
+      const base = await baseCurrency();
       const summary = await call("/api/analytics/summary", summarySchema);
 
       const comparison =
         summary.changePercent === null
           ? "There is nothing recorded for the same days last month to compare against."
-          : `That is ${Math.abs(summary.changePercent)}% ${summary.changePercent >= 0 ? "more" : "less"} than the same ${summary.daysElapsed} days last month (€${summary.previous.totalEur}).`;
+          : `That is ${Math.abs(summary.changePercent)}% ${summary.changePercent >= 0 ? "more" : "less"} than the same ${summary.daysElapsed} days last month (${money(summary.previous.totalBase, base)}).`;
 
       return text(
-        `€${summary.totalEur} across ${summary.count} expenses in the ${summary.daysElapsed} days ` +
-          `from ${summary.from} to ${summary.to}, averaging €${summary.dailyAverageEur} a day. ${comparison}`,
+        `${money(summary.totalBase, base)} across ${summary.count} expenses in the ${summary.daysElapsed} days ` +
+          `from ${summary.from} to ${summary.to}, averaging ${money(summary.dailyAverageBase, base)} a day. ${comparison}`,
       );
     } catch (error) {
       return fail(error);

@@ -77,6 +77,22 @@ check("search_expenses finds by shop name", !searched.isError && /lidl/i.test(se
 const nothing = await callTool("search_expenses", { query: "zzzznotathing" });
 check("search_expenses says so when nothing matches", !nothing.isError && nothing.body.includes("Nothing matches"));
 
+// --- the base currency is asked for, not assumed -----------------------------
+// Non-mutating on purpose: switching the base rewrites stored figures, which is
+// not something a check script should do to somebody's data. Asking the API what
+// the base is and then asserting the tools used that symbol is enough to catch a
+// hardcoded euro sign coming back.
+const settings = await fetch(`${process.env.BACKEND_URL ?? "http://localhost:3000"}/api/settings`);
+const { baseCurrency } = (await settings.json()) as { baseCurrency: string };
+const symbol = new Intl.NumberFormat("en-IE", { style: "currency", currency: baseCurrency })
+  .format(0)
+  .replace(/[0-9.,\s]/g, "");
+check(
+  "amounts are reported in the configured base currency",
+  summary.body.includes(symbol),
+  `base is ${baseCurrency}, expected "${symbol}" in: ${summary.body.slice(0, 50)}`,
+);
+
 // --- writing -----------------------------------------------------------------
 const added = await callTool("add_expense", {
   amount: 12.5,

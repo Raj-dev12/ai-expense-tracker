@@ -4,10 +4,12 @@ import {
   createExpense,
   getCategories,
   getMonthlySummary,
+  getSettings,
   getSummary,
   getTrend,
   listExpenses,
   parseExpense,
+  setBaseCurrency,
   updateExpense,
   type CategoryBreakdown,
   type Expense,
@@ -15,9 +17,12 @@ import {
   type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
   type ParseResponse,
+  type BaseCurrencyChange,
   type Summary,
   type Trend,
 } from "./api";
+import { formatMoney } from "./format";
+import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CategoryPie } from "./components/CategoryPie";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
@@ -67,6 +72,18 @@ export default function App() {
   const [monthlyError, setMonthlyError] = useState<string | null>(null);
 
   /**
+   * The currency every total on the page is reported in.
+   *
+   * Held here because four components need it to format a number, and because
+   * changing it has to refetch everything: the endpoint rewrites the stored base
+   * figures, so the cards, both charts and the list are all stale the moment it
+   * returns.
+   */
+  const [currency, setCurrency] = useState("EUR");
+  const [currencySaving, setCurrencySaving] = useState(false);
+  const [lastCurrencyChange, setLastCurrencyChange] = useState<BaseCurrencyChange | null>(null);
+
+  /**
    * Which row is being edited, if any.
    *
    * An id rather than a boolean, so only one row can be open at a time. Two
@@ -88,12 +105,14 @@ export default function App() {
    */
   const refresh = useCallback(async () => {
     try {
-      const [list, nextSummary, nextCategories, nextTrend] = await Promise.all([
+      const [list, nextSummary, nextCategories, nextTrend, settings] = await Promise.all([
         listExpenses(RECENT_COUNT),
         getSummary(),
         getCategories(),
         getTrend(),
+        getSettings(),
       ]);
+      setCurrency(settings.baseCurrency);
       setRecent(list.expenses);
       setTotal(list.total);
       setSummary(nextSummary);
@@ -198,6 +217,28 @@ export default function App() {
     }
   }
 
+  async function handleBaseCurrencyChange(next: string) {
+    if (next === currency || currencySaving) return;
+
+    setCurrencySaving(true);
+    setError(null);
+
+    try {
+      // The endpoint rewrites the stored base figures for every foreign row, so
+      // everything on screen is stale by the time it answers. Refetching is not
+      // optional here.
+      const change = await setBaseCurrency(next);
+      setLastCurrencyChange(change);
+      // The written summary quoted amounts in the old currency.
+      setMonthly(null);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Could not change the currency");
+    } finally {
+      setCurrencySaving(false);
+    }
+  }
+
   async function handleSummarise() {
     if (monthlyLoading) return;
 
@@ -220,11 +261,20 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <main className="mx-auto max-w-4xl space-y-10 px-6 py-14">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Expense tracker</h1>
-          <p className="text-slate-500">
-            Type what you spent as a sentence. Nothing is saved until you confirm it.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">Expense tracker</h1>
+            <p className="text-slate-500">
+              Type what you spent as a sentence. Nothing is saved until you confirm it.
+            </p>
+          </div>
+
+          <BaseCurrencyPicker
+            value={currency}
+            saving={currencySaving}
+            lastChange={lastCurrencyChange}
+            onChange={handleBaseCurrencyChange}
+          />
         </header>
 
         <section className="space-y-4">
@@ -252,7 +302,8 @@ export default function App() {
 
           {justSaved && (
             <p className="rounded-lg bg-accent-soft px-4 py-3 text-sm text-slate-700">
-              Saved {justSaved.merchant ?? "expense"} for {justSaved.amountEur} euros.
+              Saved {justSaved.merchant ?? "expense"} for{" "}
+              {formatMoney(justSaved.amountBase, currency)}.
             </p>
           )}
         </section>
@@ -275,7 +326,7 @@ export default function App() {
           <p className="py-16 text-center text-sm text-slate-400">Loading your expenses...</p>
         ) : (
           <>
-            {summary && <SummaryCards summary={summary} />}
+            {summary && <SummaryCards summary={summary} currency={currency} />}
 
             {summary && (
               <MonthlySummary
@@ -289,14 +340,19 @@ export default function App() {
 
             <div className="grid gap-4 lg:grid-cols-2">
               {categories && (
-                <CategoryPie categories={categories.categories} from={categories.from} />
+                <CategoryPie
+                  categories={categories.categories}
+                  from={categories.from}
+                  currency={currency}
+                />
               )}
-              {trend && <TrendChart points={trend.points} />}
+              {trend && <TrendChart points={trend.points} currency={currency} />}
             </div>
 
             <RecentExpenses
               expenses={recent}
               total={total}
+              currency={currency}
               editingId={editingId}
               savingEdit={savingEdit}
               editError={editError}

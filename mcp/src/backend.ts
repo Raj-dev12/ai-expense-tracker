@@ -34,7 +34,7 @@ export const expenseSchema = z.object({
   id: z.string(),
   amount: z.string(),
   currency: z.string(),
-  amountEur: z.string(),
+  amountBase: z.string(),
   merchant: z.string().nullable(),
   category: z.string(),
   description: z.string().nullable(),
@@ -54,7 +54,7 @@ export const categoryBreakdownSchema = z.object({
   from: z.string(),
   to: z.string(),
   categories: z.array(
-    z.object({ category: z.string(), totalEur: z.string(), count: z.number() }),
+    z.object({ category: z.string(), totalBase: z.string(), count: z.number() }),
   ),
 });
 
@@ -62,19 +62,24 @@ export const summarySchema = z.object({
   from: z.string(),
   to: z.string(),
   daysElapsed: z.number(),
-  totalEur: z.string(),
+  totalBase: z.string(),
   count: z.number(),
-  dailyAverageEur: z.string(),
+  dailyAverageBase: z.string(),
   previous: z.object({
     from: z.string(),
     to: z.string(),
-    totalEur: z.string(),
+    totalBase: z.string(),
     count: z.number(),
   }),
   changePercent: z.number().nullable(),
 });
 
 export const deletedSchema = z.object({ deleted: expenseSchema });
+
+export const settingsSchema = z.object({
+  baseCurrency: z.string(),
+  supportedCurrencies: z.array(z.string()),
+});
 
 export type Expense = z.infer<typeof expenseSchema>;
 
@@ -166,9 +171,33 @@ export function today(): string {
   }).format(new Date());
 }
 
-export function formatExpense(expense: Expense): string {
+/**
+ * Which currency totals are reported in.
+ *
+ * Asked for rather than assumed, and asked for every time rather than cached.
+ * It is a setting a person can change in the browser mid-conversation, and an
+ * assistant confidently reporting euros after they switched to pounds would be
+ * wrong in the one way that matters here. The extra request is cheap next to
+ * the one the tool is already making.
+ */
+export async function baseCurrency(): Promise<string> {
+  return (await call("/api/settings", settingsSchema)).baseCurrency;
+}
+
+/** An amount written the way a person reads it, in whatever the base is. */
+export function money(value: string | number, currency: string): string {
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+export function formatExpense(expense: Expense, base: string): string {
+  // The original is worth showing only when it differs from the base; otherwise
+  // it is the same number printed twice.
   const original =
-    expense.currency === "EUR" ? "" : ` (${expense.amount} ${expense.currency})`;
+    expense.currency === base ? "" : ` (${expense.amount} ${expense.currency})`;
   const where = expense.merchant ?? expense.description ?? "unnamed";
-  return `${expense.expenseDate} · €${expense.amountEur}${original} · ${where} · ${expense.category} · id ${expense.id}`;
+  return `${expense.expenseDate} · ${money(expense.amountBase, base)}${original} · ${where} · ${expense.category} · id ${expense.id}`;
 }

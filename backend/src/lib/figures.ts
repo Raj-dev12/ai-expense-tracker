@@ -1,6 +1,8 @@
 import { and, count, desc, eq, gte, lte, sum } from "drizzle-orm";
 import { db } from "../db/client.js";
+import { convertToBase } from "../fx/rates.js";
 import { expenses } from "../db/schema.js";
+import { toMoneyString } from "./money.js";
 import {
   addDays,
   dayOfMonth,
@@ -32,9 +34,31 @@ export function money(value: string | null): string {
   return value ?? "0.00";
 }
 
+/**
+ * What the stored base figure for one row should be.
+ *
+ * The single definition of a derived column. It is used when an expense is
+ * created, when a PATCH moves the amount, the currency or the date, and when the
+ * base currency itself changes — three callers that must agree, because they are
+ * all answering the same question: given this amount, in this currency, spent on
+ * this day, what is it worth in the base currency?
+ *
+ * The rate used is the one from the day it was spent, never today's. An expense
+ * from three weeks ago converted at today's rate is quietly wrong.
+ */
+export async function baseFigureFor(
+  amount: number | string,
+  currency: string,
+  expenseDate: string,
+  baseCurrency: string,
+): Promise<string> {
+  const conversion = await convertToBase(Number(amount), currency, expenseDate, baseCurrency);
+  return toMoneyString(conversion.amountBase);
+}
+
 export async function totalBetween(userId: string, from: string, to: string) {
   const [row] = await db
-    .select({ total: sum(expenses.amountEur), count: count() })
+    .select({ total: sum(expenses.amountBase), count: count() })
     .from(expenses)
     .where(
       and(
@@ -51,7 +75,7 @@ export async function categoryTotalsBetween(userId: string, from: string, to: st
   const rows = await db
     .select({
       category: expenses.category,
-      total: sum(expenses.amountEur),
+      total: sum(expenses.amountBase),
       count: count(),
     })
     .from(expenses)
@@ -63,14 +87,14 @@ export async function categoryTotalsBetween(userId: string, from: string, to: st
       ),
     )
     .groupBy(expenses.category)
-    .orderBy(desc(sum(expenses.amountEur)));
+    .orderBy(desc(sum(expenses.amountBase)));
 
   // Categories with no spending are left out rather than sent as zeroes: a pie
   // chart cannot draw a slice of nothing, and a legend full of empty categories
   // is noise.
   return rows.map((row) => ({
     category: row.category,
-    totalEur: money(row.total),
+    totalBase: money(row.total),
     count: row.count,
   }));
 }
@@ -108,13 +132,13 @@ export async function monthToDate(userId: string) {
     from,
     to: today,
     daysElapsed,
-    totalEur: current.total,
+    totalBase: current.total,
     count: current.count,
-    dailyAverageEur: (currentTotal / daysElapsed).toFixed(2),
+    dailyAverageBase: (currentTotal / daysElapsed).toFixed(2),
     previous: {
       from: previousStart,
       to: previousEnd,
-      totalEur: previous.total,
+      totalBase: previous.total,
       count: previous.count,
     },
     // Null rather than zero or Infinity when there is nothing to compare with:

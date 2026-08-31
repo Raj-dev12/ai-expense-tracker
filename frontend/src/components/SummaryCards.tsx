@@ -1,5 +1,5 @@
 import type { Summary } from "../api";
-import { formatEur, formatMonth } from "../format";
+import { formatMoney, formatMonth } from "../format";
 
 /**
  * Four numbers, shown as numbers.
@@ -27,7 +27,13 @@ function Card({
   );
 }
 
-export function SummaryCards({ summary }: { summary: Summary }) {
+export function SummaryCards({
+  summary,
+  currency,
+}: {
+  summary: Summary;
+  currency: string;
+}) {
   const month = formatMonth(summary.from);
 
   /**
@@ -48,7 +54,7 @@ export function SummaryCards({ summary }: { summary: Summary }) {
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card
         label={`Spent in ${month}`}
-        value={formatEur(summary.totalEur)}
+        value={formatMoney(summary.totalBase, currency)}
         note={`${summary.daysElapsed} days so far`}
       />
       <Card
@@ -58,7 +64,7 @@ export function SummaryCards({ summary }: { summary: Summary }) {
       />
       <Card
         label="Daily average"
-        value={formatEur(summary.dailyAverageEur)}
+        value={formatMoney(summary.dailyAverageBase, currency)}
         note="across the month so far"
       />
       <Card

@@ -49,7 +49,7 @@ const expenseSchema = z.object({
   // display, at the last possible moment.
   amount: z.string(),
   currency: z.string(),
-  amountEur: z.string(),
+  amountBase: z.string(),
   merchant: z.string().nullable(),
   category: z.string(),
   description: z.string().nullable(),
@@ -190,13 +190,13 @@ const summarySchema = z.object({
   from: z.string(),
   to: z.string(),
   daysElapsed: z.number(),
-  totalEur: z.string(),
+  totalBase: z.string(),
   count: z.number(),
-  dailyAverageEur: z.string(),
+  dailyAverageBase: z.string(),
   previous: z.object({
     from: z.string(),
     to: z.string(),
-    totalEur: z.string(),
+    totalBase: z.string(),
     count: z.number(),
   }),
   // Null when there is nothing to compare against, which is different from a
@@ -208,7 +208,7 @@ const categoryBreakdownSchema = z.object({
   from: z.string(),
   to: z.string(),
   categories: z.array(
-    z.object({ category: z.string(), totalEur: z.string(), count: z.number() }),
+    z.object({ category: z.string(), totalBase: z.string(), count: z.number() }),
   ),
 });
 
@@ -217,7 +217,7 @@ const trendSchema = z.object({
   to: z.string(),
   bucket: z.string(),
   points: z.array(
-    z.object({ weekStart: z.string(), totalEur: z.string(), count: z.number() }),
+    z.object({ weekStart: z.string(), totalBase: z.string(), count: z.number() }),
   ),
 });
 
@@ -233,6 +233,37 @@ export function getSummary(): Promise<Summary> {
 
 export function getCategories(): Promise<CategoryBreakdown> {
   return request("/api/analytics/categories", categoryBreakdownSchema);
+}
+
+// --- settings ----------------------------------------------------------------
+
+const settingsSchema = z.object({
+  baseCurrency: z.string(),
+  supportedCurrencies: z.array(z.string()),
+});
+
+const baseCurrencyChangeSchema = z.object({
+  baseCurrency: z.string(),
+  previousBaseCurrency: z.string(),
+  /** Rows that kept their number and are simply read as the new currency. */
+  relabelled: z.number(),
+  /** Rows that were genuinely foreign and were converted again. */
+  recomputed: z.number(),
+});
+
+export type Settings = z.infer<typeof settingsSchema>;
+export type BaseCurrencyChange = z.infer<typeof baseCurrencyChangeSchema>;
+
+export function getSettings(): Promise<Settings> {
+  return request("/api/settings", settingsSchema);
+}
+
+/** Change the currency every total is reported in. */
+export function setBaseCurrency(baseCurrency: string): Promise<BaseCurrencyChange> {
+  return request("/api/settings", baseCurrencyChangeSchema, {
+    method: "PATCH",
+    body: JSON.stringify({ baseCurrency }),
+  });
 }
 
 export function getTrend(): Promise<Trend> {

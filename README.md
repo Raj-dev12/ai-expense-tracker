@@ -21,7 +21,8 @@ wrong, and only when you press confirm does the browser call the ordinary, valid
 that writes a row. Below the box, a dashboard shows the month's total against the same
 stretch of last month, a pie of where the money went, a fourteen-week trend line, and the
 most recent expenses. Amounts entered in another currency are converted to euros using the
-European Central Bank's rate *for the day they were spent*, and both figures are kept. A
+European Central Bank's rate *for the day they were spent*, and both figures are kept. The
+currency the totals are reported in is a setting, picked from a short list at the top right. A
 button asks the AI to describe the month in a sentence or two, and the card underneath it says
 which parser actually wrote that sentence. Any row in the list can be corrected in place,
 using the same chips the confirm step uses. An MCP server lets an outside AI assistant query
@@ -56,7 +57,7 @@ anywhere else.
 
 | Piece | What | Why |
 |---|---|---|
-| Backend | TypeScript, Fastify, Drizzle, PostgreSQL, Zod | Zod validates every input crossing a boundary. Money is `numeric(12,2)` — a decimal column, never a float. |
+| Backend | TypeScript, Fastify, Drizzle, PostgreSQL, Zod | Zod validates every input crossing a boundary. Money is `numeric(12,2)` — a decimal column, never a float. Every row stores what was spent and its value in the base currency. |
 | Frontend | TypeScript, React, Vite, Tailwind, Recharts | One page, no router. Light theme, one accent colour. |
 | AI | `@anthropic-ai/sdk`, `openai`, and an offline mock | One `ExpenseParser` interface, three implementations, chosen by an environment variable. |
 | MCP | `@modelcontextprotocol/sdk` over stdio | Seven tools, each calling the backend's HTTP API rather than the database. |
@@ -139,6 +140,34 @@ instead. If that provider errors, times out, or returns something that fails val
 request falls back to the mock rather than failing — and the response names the parser that
 *actually* answered, not the one configured, because on a fallback those differ.
 
+## The base currency is a setting
+
+Every expense stores two figures: what was actually spent (`amount` and `currency`) and what
+that was worth in the base currency (`amount_base`). The base is picked from a short list at
+the top right of the page, and it is stored against the user rather than hardcoded.
+
+Switching it does two different things to two different kinds of row, and the difference is
+worth understanding before you click it:
+
+| The row | What happens |
+|---|---|
+| Recorded in the **old base** — a `42 EUR` expense while the base was EUR | Keeps its number. It now reads as `£42`. |
+| Recorded in **some other currency** — a `30 GBP` expense holding a euro figure | Recomputed, at the rate for the day it was spent. |
+
+The first case is a **relabel, not a conversion**, and the control says so in as many words.
+There is no rate that makes `£42` the "correct" reading of something recorded as plain `42`:
+no conversion ever happened for that row, because it was already in the base. Converting it
+would be inventing a number the records never contained.
+
+The consequence to know about: **switching back and forth is lossy.** A `30 GBP` expense
+becomes `£30` under a GBP base, and switching back to EUR relabels it as `€30` rather than
+restoring the `€35.10` it used to hold. That is the same rule applied twice, not a bug, but
+it does mean the base is a decision rather than a toggle to play with. Re-running the seed
+resets everything if you have been experimenting.
+
+The recomputation goes through the same function the create and edit routes use, so there is
+one definition of what `amount_base` should be and not three.
+
 ## The MCP server runs locally, not in compose
 
 An MCP server exposes tools to an AI assistant. This one has seven: `add_expense`,
@@ -189,6 +218,8 @@ DELETE /api/expenses/:id
 GET    /api/analytics/summary   month to date, vs the same days last month
 GET    /api/analytics/categories
 GET    /api/analytics/trend     weekly buckets
+GET    /api/settings            the base currency, and what it can be changed to
+PATCH  /api/settings            change it; relabels rows already in it, converts the rest
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
 POST   /api/ai/monthly-summary  this month in a sentence or two, saves nothing
 ```

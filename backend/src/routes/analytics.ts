@@ -6,7 +6,7 @@ import { addDays, startOfMonth, startOfWeek, todayIso, weekStartsBetween } from 
 // The queries behind these live in one module because the AI monthly summary
 // needs the same numbers. See lib/figures.ts.
 import { categoryTotalsBetween, money, monthToDate } from "../lib/figures.js";
-import { getDemoUserId } from "../lib/user.js";
+import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import { rangeQuerySchema, summaryQuerySchema } from "../schemas/analytics.js";
 
@@ -17,7 +17,7 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
   /** Month to date, and the same stretch of the month before. */
   app.get("/api/analytics/summary", async (request) => {
     validate(summaryQuerySchema, request.query, "parameters");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     return monthToDate(userId);
   });
@@ -25,7 +25,7 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
   /** What the pie chart draws: one slice per category that has anything in it. */
   app.get("/api/analytics/categories", async (request) => {
     const query = validate(rangeQuerySchema, request.query, "filters");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     const today = todayIso();
     const to = query.to ?? today;
@@ -44,7 +44,7 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
    */
   app.get("/api/analytics/trend", async (request) => {
     const query = validate(rangeQuerySchema, request.query, "filters");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     const today = todayIso();
     const to = query.to ?? today;
@@ -53,7 +53,7 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
     const rows = await db
       .select({
         weekStart: sql<string>`to_char(date_trunc('week', ${expenses.expenseDate}), 'YYYY-MM-DD')`,
-        total: sum(expenses.amountEur),
+        total: sum(expenses.amountBase),
         count: count(),
       })
       .from(expenses)
@@ -76,7 +76,7 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
       const row = byWeek.get(weekStart);
       return {
         weekStart,
-        totalEur: money(row?.total ?? null),
+        totalBase: money(row?.total ?? null),
         count: row?.count ?? 0,
       };
     });

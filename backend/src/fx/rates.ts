@@ -9,6 +9,12 @@ import { HttpError } from "../lib/http-error.js";
  * deliberately approximate and deliberately fixed: a demo that cannot convert a
  * currency is broken, and a demo that converts it slightly wrong while saying so
  * is merely imperfect.
+ *
+ * Euro-denominated even though the base currency is now configurable. That is
+ * not an oversight: the European Central Bank publishes its reference rates
+ * against the euro, so this is the shape the real data arrives in. A rate
+ * between any two of these is worked out by going through the euro, which is
+ * exactly what a bank's cross rate is.
  */
 export const STATIC_EUR_RATES: Record<string, number> = {
   EUR: 1,
@@ -31,7 +37,8 @@ export const SUPPORTED_CURRENCIES = Object.keys(STATIC_EUR_RATES);
 export type RateSource = "live" | "fallback" | "base";
 
 export type Conversion = {
-  amountEur: number;
+  /** The amount expressed in whatever base currency was asked for. */
+  amountBase: number;
   rate: number;
   source: RateSource;
   /** The day the rate is actually from, which is not always the day asked for. */
@@ -66,39 +73,55 @@ export function clearRateCache(): void {
   cache.clear();
 }
 
-/**
- * Convert using the fixed table. No network, always available, always the same.
- *
- * The seed script uses this deliberately: seeded data has to be reproducible, and
- * a seed that fetched live rates would produce different euro amounts every day,
- * which would defeat the point of a fixed random seed.
- */
-export function convertWithStaticRate(amount: number, currency: string): Conversion {
-  const rate = STATIC_EUR_RATES[currency];
-
-  if (rate === undefined) {
+function assertSupported(currency: string): void {
+  if (!Object.hasOwn(STATIC_EUR_RATES, currency)) {
     throw new HttpError(400, `Unsupported currency: ${currency}`, {
       supported: SUPPORTED_CURRENCIES,
     });
   }
+}
+
+/**
+ * Convert using the fixed table. No network, always available, always the same.
+ *
+ * The seed script uses this deliberately: seeded data has to be reproducible, and
+ * a seed that fetched live rates would produce different figures every day,
+ * which would defeat the point of a fixed random seed.
+ *
+ * The cross rate goes through the euro — how many euros a unit of the source is
+ * worth, divided by how many euros a unit of the base is worth.
+ */
+export function convertWithStaticRate(
+  amount: number,
+  currency: string,
+  base = "EUR",
+): Conversion {
+  assertSupported(currency);
+  assertSupported(base);
+
+  const rate = STATIC_EUR_RATES[currency]! / STATIC_EUR_RATES[base]!;
 
   return {
-    amountEur: amount * rate,
+    amountBase: amount * rate,
     rate,
-    source: currency === "EUR" ? "base" : "fallback",
+    source: currency === base ? "base" : "fallback",
     rateDate: "static",
   };
 }
 
 /**
- * Ask Frankfurter what one unit of a currency was worth in euros on a given day.
+ * Ask Frankfurter what one unit of a currency was worth in another on a given day.
  *
  * Returns null rather than throwing when anything goes wrong, because the caller
  * always has the fixed table to fall back on and a conversion failure should
  * never become a failed request.
  */
-async function fetchRate(currency: string, onDate: string): Promise<CacheEntry | null> {
-  const url = `${env.FX_API_URL.replace(/\/$/, "")}/${onDate}?from=${currency}&to=EUR`;
+async function fetchRate(
+  currency: string,
+  base: string,
+  onDate: string,
+): Promise<CacheEntry | null> {
+  const url = `${env.FX_API_URL.replace(/\/$/, "")}/${onDate}?from=${currency}&to=${base}`;
 
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -113,9 +136,9 @@ async function fetchRate(currency: string, onDate: string): Promise<CacheEntry |
       return null;
     }
 
-    const rate = parsed.data.rates.EUR;
+    const rate = parsed.data.rates[base];
     if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
-      console.warn(`Rate service gave no usable EUR rate for ${currency} on ${onDate}`);
+      console.warn(`Rate service gave no usable ${base} rate for ${currency} on ${onDate}`);
       return null;
     }
 
@@ -135,7 +158,8 @@ async function fetchRate(currency: string, onDate: string): Promise<CacheEntry |
 }
 
 /**
- * Convert an amount into euros using the rate from the day it was spent.
+ * Convert an amount into the base currency, using the rate from the day it was
+ * spent.
  *
  * The rate on the day is more truthful than today's rate, and with a service
  * that serves history for free it costs nothing extra to be right. Rates are
@@ -146,44 +170,44 @@ async function fetchRate(currency: string, onDate: string): Promise<CacheEntry |
  * conversion says which happened, so nothing has to pretend a fallback figure is
  * a real one.
  */
-export async function convertToEur(
+export async function convertToBase(
   amount: number,
   currency: string,
   onDate: string,
+  base = "EUR",
 ): Promise<Conversion> {
-  if (!Object.hasOwn(STATIC_EUR_RATES, currency)) {
-    throw new HttpError(400, `Unsupported currency: ${currency}`, {
-      supported: SUPPORTED_CURRENCIES,
-    });
+  assertSupported(currency);
+  assertSupported(base);
+
+  // Money already in the base currency needs no conversion, and asking a rate
+  // service about it would be a network call to be told the answer is one.
+  if (currency === base) {
+    return { amountBase: amount, rate: 1, source: "base", rateDate: onDate };
   }
 
-  // Euros need no conversion, and asking a rate service about them would be a
-  // network call to be told the answer is one.
-  if (currency === "EUR") {
-    return { amountEur: amount, rate: 1, source: "base", rateDate: onDate };
-  }
-
-  const key = `${onDate}|${currency}`;
+  // The base belongs in the key. Without it, switching the base currency would
+  // hand back a cached rate computed against the previous one.
+  const key = `${onDate}|${currency}|${base}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return {
-      amountEur: amount * cached.rate,
+      amountBase: amount * cached.rate,
       rate: cached.rate,
       source: "live",
       rateDate: cached.rateDate,
     };
   }
 
-  const fetched = await fetchRate(currency, onDate);
+  const fetched = await fetchRate(currency, base, onDate);
   if (fetched) {
     cache.set(key, fetched);
     return {
-      amountEur: amount * fetched.rate,
+      amountBase: amount * fetched.rate,
       rate: fetched.rate,
       source: "live",
       rateDate: fetched.rateDate,
     };
   }
 
-  return convertWithStaticRate(amount, currency);
+  return convertWithStaticRate(amount, currency, base);
 }

@@ -2,10 +2,10 @@ import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses, type ExpenseRow } from "../db/schema.js";
-import { convertToEur } from "../fx/rates.js";
+import { baseFigureFor } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { toMoneyString } from "../lib/money.js";
-import { getDemoUserId } from "../lib/user.js";
+import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import {
   createExpenseSchema,
@@ -32,7 +32,7 @@ function serializeExpense(row: ExpenseRow) {
     id: row.id,
     amount: row.amount,
     currency: row.currency,
-    amountEur: row.amountEur,
+    amountBase: row.amountBase,
     merchant: row.merchant,
     category: row.category,
     description: row.description,
@@ -53,7 +53,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post("/api/expenses", async (request, reply) => {
     const input = validate(createExpenseSchema, request.body, "expense");
-    const userId = await getDemoUserId();
+    const { id: userId, baseCurrency } = await getDemoUser();
 
     const [existing] = await db
       .select({ total: count() })
@@ -65,7 +65,12 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Converted at the rate from the day it was spent, not today.
-    const conversion = await convertToEur(input.amount, input.currency, input.expenseDate);
+    const amountBase = await baseFigureFor(
+      input.amount,
+      input.currency,
+      input.expenseDate,
+      baseCurrency,
+    );
 
     const [created] = await db
       .insert(expenses)
@@ -73,7 +78,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
         userId,
         amount: toMoneyString(input.amount),
         currency: input.currency,
-        amountEur: toMoneyString(conversion.amountEur),
+        amountBase,
         merchant: input.merchant ?? null,
         category: input.category,
         description: input.description ?? null,
@@ -89,7 +94,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/expenses", async (request) => {
     const query = validate(listExpensesQuerySchema, request.query, "filters");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     const filters = [eq(expenses.userId, userId)];
     if (query.from) filters.push(gte(expenses.expenseDate, query.from));
@@ -108,7 +113,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     if (query.minAmount !== undefined) {
       // The comparison happens in the database against the decimal column, so
       // the filter is exact rather than approximate.
-      filters.push(gte(expenses.amountEur, toMoneyString(query.minAmount)));
+      filters.push(gte(expenses.amountBase, toMoneyString(query.minAmount)));
     }
 
     const where = and(...filters);
@@ -134,7 +139,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/expenses/:id", async (request) => {
     const { id } = validate(expenseIdParamSchema, request.params, "expense id");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     const [row] = await db
       .select()
@@ -163,7 +168,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/api/expenses/:id", async (request) => {
     const { id } = validate(expenseIdParamSchema, request.params, "expense id");
     const patch = validate(updateExpenseSchema, request.body, "changes");
-    const userId = await getDemoUserId();
+    const { id: userId, baseCurrency } = await getDemoUser();
 
     const [existing] = await db
       .select()
@@ -210,8 +215,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       const currency = patch.currency ?? existing.currency;
       const expenseDate = patch.expenseDate ?? existing.expenseDate;
 
-      const conversion = await convertToEur(amount, currency, expenseDate);
-      changes.amountEur = toMoneyString(conversion.amountEur);
+      changes.amountBase = await baseFigureFor(amount, currency, expenseDate, baseCurrency);
     }
 
     const [updated] = await db
@@ -227,7 +231,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete("/api/expenses/:id", async (request) => {
     const { id } = validate(expenseIdParamSchema, request.params, "expense id");
-    const userId = await getDemoUserId();
+    const { id: userId } = await getDemoUser();
 
     const [deleted] = await db
       .delete(expenses)

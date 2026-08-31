@@ -4,27 +4,36 @@
  * Amounts arrive as strings, exactly as the database holds them, so no precision
  * is lost on the way. This is the one place they become numbers, and it happens
  * at the last possible moment: for display, and for the charts.
+ *
+ * The currency is passed in rather than fixed, because the base currency is a
+ * setting now. The formatters are cached per currency: building an
+ * Intl.NumberFormat is not free, and the charts format every tick and every
+ * tooltip.
  */
 
-const euros = new Intl.NumberFormat("en-IE", {
-  style: "currency",
-  currency: "EUR",
-  maximumFractionDigits: 2,
-});
+const full = new Map<string, Intl.NumberFormat>();
+const short = new Map<string, Intl.NumberFormat>();
 
-const wholeEuros = new Intl.NumberFormat("en-IE", {
-  style: "currency",
-  currency: "EUR",
-  maximumFractionDigits: 0,
-});
+function formatter(cache: Map<string, Intl.NumberFormat>, currency: string, digits: number) {
+  const existing = cache.get(currency);
+  if (existing) return existing;
 
-export function formatEur(value: string | number): string {
-  return euros.format(Number(value));
+  const made = new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: digits,
+  });
+  cache.set(currency, made);
+  return made;
+}
+
+export function formatMoney(value: string | number, currency: string): string {
+  return formatter(full, currency, 2).format(Number(value));
 }
 
 /** Axis ticks have no room for cents. */
-export function formatEurShort(value: number): string {
-  return wholeEuros.format(value);
+export function formatMoneyShort(value: number, currency: string): string {
+  return formatter(short, currency, 0).format(value);
 }
 
 const dayMonth = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });

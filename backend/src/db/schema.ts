@@ -40,7 +40,7 @@ export const categories = pgTable("categories", {
 /**
  * The real table.
  *
- * `amount` and `currency` are what was actually spent. `amountEur` is the same
+ * `amount` and `currency` are what was actually spent. `amountBase` is the same
  * money converted to euros, which is what every total and chart adds up. Both
  * are `numeric`, never a float: 0.1 + 0.2 does not equal 0.3 in binary floating
  * point, which is fine for physics and unacceptable for money.
@@ -58,7 +58,10 @@ export const expenses = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
     currency: char("currency", { length: 3 }).notNull(),
-    amountEur: numeric("amount_eur", { precision: 12, scale: 2 }).notNull(),
+    // The amount expressed in the user's base currency, which is configurable and
+    // no longer always the euro. Derived from the amount, the currency and the
+    // date, so it is recomputed whenever any of those three change.
+    amountBase: numeric("amount_base", { precision: 12, scale: 2 }).notNull(),
     merchant: varchar("merchant", { length: 120 }),
     category: varchar("category", { length: 40 }).notNull(),
     description: text("description"),

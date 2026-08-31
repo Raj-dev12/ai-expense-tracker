@@ -21,6 +21,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
+import { BaseCurrencyPicker, COMMON_BASE_CURRENCIES } from "./components/BaseCurrencyPicker";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
 import { buildPatch } from "./components/ExpenseEditor";
 import { MonthlySummary } from "./components/MonthlySummary";
@@ -83,11 +84,11 @@ check("save disabled without an amount", noAmount.includes("disabled"));
 // 4. Summary cards.
 const summary: Summary = {
   from: "2026-08-01", to: "2026-08-31", daysElapsed: 31,
-  totalEur: "1836.95", count: 31, dailyAverageEur: "59.26",
-  previous: { from: "2026-07-01", to: "2026-07-31", totalEur: "1975.22", count: 36 },
+  totalBase: "1836.95", count: 31, dailyAverageBase: "59.26",
+  previous: { from: "2026-07-01", to: "2026-07-31", totalBase: "1975.22", count: 36 },
   changePercent: -7,
 };
-const cards = renderToStaticMarkup(<SummaryCards summary={summary} />);
+const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" />);
 check("card: month total", cards.includes("1,836.95"), cards.slice(0, 0));
 check("card: names the month", cards.includes("August"));
 check("card: count", cards.includes(">31<"));
@@ -97,7 +98,7 @@ check("card: comparison says what it compares", cards.includes("same 31 days las
 check("card: down arrow for a fall", cards.includes("↓"));
 
 const noComparison = renderToStaticMarkup(
-  <SummaryCards summary={{ ...summary, changePercent: null }} />,
+  <SummaryCards summary={{ ...summary, changePercent: null }} currency="EUR" />,
 );
 check(
   "card: nothing to compare is said, not shown as zero",
@@ -107,23 +108,23 @@ check(
 
 // 5. The pie folds to six slices and always writes the values out.
 const nine: CategorySlice[] = [
-  { category: "Groceries", totalEur: "500.00", count: 10 },
-  { category: "Bills", totalEur: "400.00", count: 8 },
-  { category: "Shopping", totalEur: "300.00", count: 6 },
-  { category: "Travel", totalEur: "200.00", count: 2 },
-  { category: "Transport", totalEur: "100.00", count: 5 },
-  { category: "Restaurants", totalEur: "50.00", count: 4 },
-  { category: "Entertainment", totalEur: "40.00", count: 3 },
-  { category: "Health", totalEur: "30.00", count: 2 },
-  { category: "Other", totalEur: "20.00", count: 1 },
+  { category: "Groceries", totalBase: "500.00", count: 10 },
+  { category: "Bills", totalBase: "400.00", count: 8 },
+  { category: "Shopping", totalBase: "300.00", count: 6 },
+  { category: "Travel", totalBase: "200.00", count: 2 },
+  { category: "Transport", totalBase: "100.00", count: 5 },
+  { category: "Restaurants", totalBase: "50.00", count: 4 },
+  { category: "Entertainment", totalBase: "40.00", count: 3 },
+  { category: "Health", totalBase: "30.00", count: 2 },
+  { category: "Other", totalBase: "20.00", count: 1 },
 ];
 const folded = foldToSixSlices(nine);
 check("pie: folds nine categories to six", folded.length === 6, `${folded.length} slices`);
 check("pie: the sixth slice is Other", folded[5]?.category === "Other");
 check(
   "pie: folding loses nothing",
-  Math.round(folded.reduce((t, s) => t + Number(s.totalEur), 0) * 100) === 164000,
-  String(folded.reduce((t, s) => t + Number(s.totalEur), 0)),
+  Math.round(folded.reduce((t, s) => t + Number(s.totalBase), 0) * 100) === 164000,
+  String(folded.reduce((t, s) => t + Number(s.totalBase), 0)),
 );
 check(
   "pie: folded counts add up",
@@ -134,7 +135,7 @@ check("pie: six or fewer is left alone", foldToSixSlices(nine.slice(0, 5)).lengt
 // A real "Other" already in the top five must absorb the remainder rather than
 // producing a second slice with the same name.
 const withOtherHigh: CategorySlice[] = [
-  { category: "Other", totalEur: "900.00", count: 9 },
+  { category: "Other", totalBase: "900.00", count: 9 },
   ...nine.slice(0, 8),
 ];
 const merged = foldToSixSlices(withOtherHigh);
@@ -143,7 +144,7 @@ check(
   merged.filter((s) => s.category === "Other").length === 1,
 );
 
-const pie = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" />);
+const pie = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="EUR" />);
 check("pie: legend names each category", pie.includes("Groceries") && pie.includes("Bills"));
 check("pie: legend carries the amount as text", pie.includes("500.00"));
 check("pie: legend carries the share", pie.includes("%"));
@@ -160,16 +161,16 @@ check(
   "a viewport breakpoint cannot know how wide this card is",
 );
 
-const emptyPie = renderToStaticMarkup(<CategoryPie categories={[]} from="2026-08-01" />);
+const emptyPie = renderToStaticMarkup(<CategoryPie categories={[]} from="2026-08-01" currency="EUR" />);
 check("pie: empty month says so", emptyPie.includes("Nothing recorded this month yet"));
 
 // 6. The trend chart.
 const points = Array.from({ length: 14 }, (_, i) => ({
   weekStart: `2026-0${i < 5 ? 6 : i < 10 ? 7 : 8}-0${(i % 4) + 1}`,
-  totalEur: (100 + i * 10).toFixed(2),
+  totalBase: (100 + i * 10).toFixed(2),
   count: i,
 }));
-const trend = renderToStaticMarkup(<TrendChart points={points} />);
+const trend = renderToStaticMarkup(<TrendChart points={points} currency="EUR" />);
 check("trend: heading", trend.includes("The last three months"));
 check("trend: says what a point is", trend.includes("Spending per week"));
 check("trend: direct-labels the busiest week only", (trend.match(/busiest was/g) ?? []).length === 1);
@@ -177,17 +178,18 @@ check("trend: direct-labels the busiest week only", (trend.match(/busiest was/g)
 // 7. The recent list.
 const expenses: Expense[] = [
   {
-    id: "1", amount: "30.00", currency: "GBP", amountEur: "35.10",
+    id: "1", amount: "30.00", currency: "GBP", amountBase: "35.10",
     merchant: "Tesco", category: "Groceries", description: null,
     expenseDate: "2026-08-29", createdAt: "2026-08-31T00:00:00.000Z", source: "web",
   },
   {
-    id: "2", amount: "12.50", currency: "EUR", amountEur: "12.50",
+    id: "2", amount: "12.50", currency: "EUR", amountBase: "12.50",
     merchant: "Fafa", category: "Restaurants", description: null,
     expenseDate: "2026-08-31", createdAt: "2026-08-31T00:00:00.000Z", source: "mcp",
   },
 ];
 const listProps = {
+  currency: "EUR",
   editingId: null,
   savingEdit: false,
   editError: null,
@@ -352,5 +354,47 @@ const commaTyped = buildPatch(editable, {
   note: editable.description ?? "",
 });
 check("patch: a comma decimal is understood", commaTyped.amount === 41.5, JSON.stringify(commaTyped));
+
+// 10. The base currency reaches every number on the page.
+//
+// The point of the rename is that nothing says "euro" unless the euro is
+// actually the base, so these render the same fixtures as pounds and check the
+// symbol followed the setting.
+const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="GBP" />);
+check("currency: cards use the base symbol", cardsGbp.includes("£1,836.95"), cardsGbp.match(/[£€][0-9,.]+/)?.[0] ?? "none");
+check("currency: cards do not still say euro", !cardsGbp.includes("€"));
+
+const pieGbp = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="GBP" />);
+check("currency: the pie legend follows the base", pieGbp.includes("£500.00"));
+check("currency: the pie legend drops the euro", !pieGbp.includes("€"));
+
+const listGbp = renderToStaticMarkup(
+  <RecentExpenses expenses={expenses} total={97} {...listProps} currency="GBP" />,
+);
+check("currency: the list follows the base", listGbp.includes("£35.10"));
+// The €12.50 row was entered in EUR. With a GBP base that is now a foreign
+// currency, so the original has to appear — it did not before, when EUR was the
+// base and showing it would have been repeating the same number twice.
+check("currency: a row in the old base now shows its original", listGbp.includes("12.50 EUR"));
+check("currency: the row in the base currency still does not repeat itself", !listGbp.includes("30.00 GBP"));
+
+// 11. The base currency picker says what switching will do.
+const picker = renderToStaticMarkup(
+  <BaseCurrencyPicker value="EUR" saving={false} lastChange={null} onChange={() => {}} />,
+);
+check("picker: labelled", picker.includes("Totals in"));
+check("picker: offers a short list, not all twelve", (picker.match(/<option/g) ?? []).length === COMMON_BASE_CURRENCIES.length);
+check("picker: warns that it relabels rather than converts", picker.includes("Relabels amounts already in this currency"));
+
+const afterSwitch = renderToStaticMarkup(
+  <BaseCurrencyPicker
+    value="GBP"
+    saving={false}
+    lastChange={{ baseCurrency: "GBP", previousBaseCurrency: "EUR", relabelled: 95, recomputed: 3 }}
+    onChange={() => {}}
+  />,
+);
+check("picker: reports how many kept their number", afterSwitch.includes("95 expenses kept their number"));
+check("picker: reports how many were converted", afterSwitch.includes("3 in another currency were converted again"));
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");

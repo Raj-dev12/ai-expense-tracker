@@ -54,7 +54,8 @@ export function summarySystemPrompt(): string {
     "You write a short, plain summary of somebody's spending for one month.",
     "Two or three sentences. State the total, the largest category, and how it",
     "compares with the previous month when that figure is given.",
-    "No advice, no judgement, no bullet points. Amounts are in euros.",
+    "No advice, no judgement, no bullet points. The figures carry a baseCurrency",
+    "field; report the amounts in that currency and use its symbol.",
   ].join("\n");
 }
 
