@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { closeDb } from "./db/client.js";
 import { env } from "./env.js";
 import { HttpError } from "./lib/http-error.js";
+import { aiRoutes } from "./routes/ai.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { healthRoutes } from "./routes/health.js";
 
@@ -36,6 +37,7 @@ app.setNotFoundHandler((request, reply) =>
 
 await app.register(healthRoutes);
 await app.register(expenseRoutes);
+await app.register(aiRoutes);
 
 // Docker containers need 0.0.0.0 rather than localhost, or nothing outside the
 // container can reach the server.

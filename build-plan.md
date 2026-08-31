@@ -23,7 +23,7 @@ in Docker, behind HTTPS.
 | Login | None. One built-in demo user. |
 | Look | Light, clean, generous spacing, one accent colour. |
 | AI | Swappable providers behind one interface, plus an offline fake. |
-| Seed data | ~30 expenses across 3 months, loaded by a re-runnable script. |
+| Seed data | ~90 expenses across 3 months, loaded by a re-runnable script. |
 | Currency | Base EUR. Store original amount and converted amount. |
 | Address | Free `sslip.io` address, real HTTPS. |
 | Extra feature | AI monthly summary. No receipt photos. |
@@ -121,7 +121,7 @@ Test with curl before touching the frontend.
 
 > Ask Claude Code: *Set up a Fastify backend in TypeScript with Drizzle and PostgreSQL.
 > Create users, categories and expenses tables as specified. Write a seed script that
-> inserts one demo user and about thirty realistic euro expenses spread over the last three
+> inserts one demo user and about ninety realistic euro expenses spread over the last three
 > months, weighted so groceries and bills are the largest categories. Add CRUD routes for
 > expenses with Zod validation on every input. Add a health endpoint.*
 

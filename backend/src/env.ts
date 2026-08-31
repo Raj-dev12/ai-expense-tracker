@@ -15,6 +15,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(3000),
   ALLOW_SEED: z.enum(["true", "false"]).default("false"),
+  // Which AI adapter to use. Defaults to the offline mock so the app runs
+  // fully with no API key set anywhere.
+  AI_PROVIDER: z.enum(["mock", "claude", "openai"]).default("mock"),
 });
 
 const result = envSchema.safeParse(process.env);

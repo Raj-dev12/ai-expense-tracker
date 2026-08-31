@@ -19,7 +19,8 @@ that lives in `progress.md`. This is purely "what does that word mean and why do
 9. [Terms: hosting and deployment](#9-terms-hosting-and-deployment)
 10. [Terms: tools we type into](#10-terms-tools-we-type-into)
 11. [Decisions we made and why](#11-decisions-we-made-and-why)
-12. [Running log](#12-running-log)
+12. [Security notes](#12-security-notes)
+13. [Running log](#13-running-log)
 
 ---
 
@@ -248,6 +249,19 @@ added.
 Closing database connections properly when the server is told to stop, instead of vanishing
 mid-request. Without it, a restart can leave connections stranded on the database.
 
+**Regular expression (regex)**
+A pattern for finding shapes in text — "a run of digits, optionally followed by a comma and
+two more digits". Compact and genuinely useful, and unreadable enough that every one in this
+project has a comment above it saying what it is looking for. Our mock parser is built almost
+entirely out of them.
+
+**Inherited properties (and `Object.hasOwn`)**
+Every plain JavaScript object silently inherits properties it was never given — `constructor`,
+`toString` and a few others. So looking up `table[word]` can return something real even when
+the word was never in your table, which is how "5 constructor" briefly parsed as a currency.
+`Object.hasOwn(table, word)` asks whether the table itself has that key, and is the correct
+way to look something up using text a stranger typed.
+
 ---
 
 ## 6. Terms: the database
@@ -405,7 +419,7 @@ be and check the file really is an image, or you hand strangers a way to fill yo
 
 **Seeding**
 Loading a database with starter data automatically, usually via a script you can re-run.
-Ours will insert about thirty invented expenses so the charts have something to show the
+Ours inserts about ninety invented expenses so the charts have something to show the
 moment anyone opens the app.
 
 **The core safety pattern of this project**
@@ -424,6 +438,12 @@ what the user typed
 
 The AI is a helpful assistant that suggests, never an authority that commands. If you
 remember one architectural idea from this build, make it this one.
+
+**Confidence score**
+A number from 0 to 1 saying how much of a sentence the parser actually recognised, rather
+than assumed. Ours is a simple tally: points for finding an amount, a currency symbol, a
+category keyword, a shop name and a date phrase. It is deliberately capped below 1, because a
+parser that can claim certainty invites people to stop reading the confirmation step.
 
 ---
 
@@ -608,7 +628,7 @@ want when someone asks you about the project in six months.
 | Login | None — one built-in demo user | Auth is time-consuming and adds nothing to what this project is showing off. We still keep a `users` table with one row in it, so real logins can be added later without redesigning the database. |
 | Visual style | Light, clean, generous spacing | Financial software reads as trustworthy when it's restrained. Also easier to get right quickly than a dark theme, where getting contrast wrong is more obvious. |
 | AI provider | Swappable, with an offline fake mode | Lets us build and test without spending money or waiting on a network. Anyone can clone the repo and run it with no API key. Removes the risk of a live demo failing because a third party is having a bad day. |
-| Starting data | ~30 invented expenses across 3 months | An empty app looks broken and gives the charts nothing to draw. Three months is the minimum that makes month-over-month comparison meaningful. |
+| Starting data | ~90 invented expenses across 3 months | An empty app looks broken and gives the charts nothing to draw. Three months is the minimum that makes month-over-month comparison meaningful. |
 | Web address | Free automatic address (sslip.io) for now | Costs nothing, still gets a real HTTPS padlock, and avoids waiting hours for DNS to spread. Swapping to a purchased domain later is a one-line change in the Caddy config. |
 | Extra feature | AI monthly spending summary, not receipt photos | Reuses AI plumbing we're already building, needs no file uploads or image storage, and still works in fake mode. Roughly 20 minutes of work versus 90. |
 | Home currency | Euro | Every expense is stored both as entered and as converted to EUR, so totals always add up in one currency regardless of what was typed. |
@@ -631,7 +651,214 @@ want when someone asks you about the project in six months.
 
 ---
 
-## 12. Running log
+## 12. Security notes
+
+Practical rules, and the reasoning behind them. Most security failures in small projects
+aren't clever attacks — they're a secret committed to Git, or an input nobody checked.
+
+---
+
+### What counts as a secret
+
+**Never share, paste, commit or screenshot:**
+
+- API keys and tokens of any kind
+- Passwords
+- Connection strings that contain a password (`postgres://user:PASSWORD@host/db`)
+- Private keys — SSH keys, TLS keys, anything ending `.pem` or `.key`
+- The contents of a `.env` file
+- Session cookies
+
+**Fine to share:**
+
+- Private network addresses (`127.0.0.1`, `192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`)
+- Your machine's hostname
+- File paths on your own computer
+- Invented or seeded demo data
+- Error messages and stack traces — *after* checking they don't quote a connection string,
+  which they sometimes do
+
+**Judgement needed:**
+
+- Your VPS's public IP, especially alongside a description of what's running on it
+- Server logs, which often contain more than you expect
+- Screenshots — check the whole window, not just the part you meant to show
+
+The test: would I mind if this ended up in a log file somebody reads later?
+
+---
+
+### Private versus public addresses
+
+An address tells you how exposed something is.
+
+| Range | Meaning |
+|---|---|
+| `127.0.0.1` | This machine only. Nothing outside can reach it. |
+| `192.168.x.x`, `10.x.x.x`, `172.16–31.x.x` | Your local network. Not reachable from the internet. |
+| `169.254.x.x` | A placeholder the OS invents when normal setup failed. Harmless. |
+| Anything else | Potentially the public internet. Treat with care. |
+
+This is why the four addresses the backend printed at startup were safe to share, and why a
+VPS address is a different conversation.
+
+---
+
+### The .env rule
+
+Secrets live in `.env`. `.env` is listed in `.gitignore`. `.gitignore` exists before the
+first commit. In that order, always.
+
+A committed `.env.example` shows *which* settings exist, with the values blanked, so someone
+cloning the project knows what to fill in. The real `.env` never leaves your machine.
+
+**What actually protects `.env`:** not access control. Claude Code created ours with a plain
+`cp .env.example .env`, and it can read the file back just as easily — so can anything else
+running in your terminal. The protection is `.gitignore`, and it works because it is
+mechanical rather than a matter of judgement: Git will not stage the file, so it cannot reach
+a commit by accident, however many times you type `git add .`.
+
+The practical consequence is that everything in `.env` should be treated as visible to the
+tools you run and to anyone who can see your screen. Keeping it out of Git is the easy half.
+The other half is keeping it out of terminal output, screenshots and error messages, which is
+why `CLAUDE.md` says never to print a key in a log — a file being ignored by Git does nothing
+to stop its contents appearing in a console.
+
+---
+
+### Git remembers everything
+
+Committing a secret and then deleting it in a later commit does **not** remove it. The
+original commit still contains it and can be read by anyone with the repository. Force-pushing
+a rewritten history doesn't reliably help either, because forks and caches persist.
+
+**If you commit a secret, the only real fix is to revoke it and issue a new one.** Same
+applies to pasting one anywhere public — deleting the message doesn't unshare it.
+
+Cleaning the history is optional tidying. Revoking is the actual fix, and it should happen
+first.
+
+---
+
+### The frontend cannot keep a secret
+
+Anything the browser knows, a visitor can read. View-source, developer tools, network tab —
+it's all there. An API key embedded in frontend code is visible to everyone who looks.
+
+This is why we rejected a shared-secret header on write endpoints: the frontend would have
+had to hold it, which means it wouldn't have been secret. Rate limits, a row cap and a
+nightly re-seed protect the demo honestly instead.
+
+Corollary: any check that matters must happen on the server. Frontend validation is a
+convenience for the user, never a security measure — anyone can bypass it by calling your
+API directly.
+
+---
+
+### Validate at every boundary
+
+A boundary is anywhere data arrives from somewhere you don't control: HTTP request bodies,
+URL parameters, AI responses, external API responses, MCP tool arguments, uploaded files.
+
+Every one gets validated with Zod. The `minAmount=banana` test proved this working — the
+value was rejected at the edge and never reached the database.
+
+**Never trust an AI's output structurally.** A model can return malformed JSON, invent a
+category that doesn't exist, or produce a negative amount. Validation is what makes the
+"AI never writes to the database" rule enforceable rather than aspirational.
+
+---
+
+### SQL injection, and why the ORM helps
+
+If user input is glued directly into a database query, a visitor can type input that changes
+what the query *does* rather than what it looks for. That's SQL injection, and it's been in
+the top few web vulnerabilities for two decades.
+
+Drizzle sends values separately from the query structure, so input can never be read as
+instructions. This protection is why "just build the query as a string" is always the wrong
+answer, however convenient it looks.
+
+---
+
+### Firewall: private networks only
+
+When Windows asked which networks Docker may accept connections from, the answer was Private,
+not Public.
+
+A development database has no meaningful protection. On an untrusted network — a café, an
+airport — allowing public access means offering that database to everyone in the room. If
+containers are ever unreachable on a public network, the fix is a VPN, not opening the
+firewall.
+
+---
+
+### Anything on a public address will be found
+
+Automated scanners sweep the entire internet continuously. A new server receives login
+attempts within minutes of coming online. This isn't personal; it's background noise.
+
+Consequences for hour 5:
+
+- Only expose ports you actually need. The database should never be reachable from outside.
+- Never reuse a development password in production.
+- Prefer SSH keys over passwords, and keep the private key on your machine only.
+- Assume every public endpoint will be called by strangers, including `DELETE`.
+
+---
+
+### Dependencies are code you didn't write
+
+`npm install` pulls in hundreds of packages written by strangers, each running with your
+full permissions. Most are fine. Some have been compromised.
+
+Modest, practical habits: prefer well-known packages, look at when one was last updated,
+be suspicious of names that are near-misses of popular packages, and don't add a dependency
+for something a few lines of your own code would do.
+
+This is why `CLAUDE.md` requires a justification before any dependency is added.
+
+---
+
+### Before making the repository public
+
+- [ ] `.env` is in `.gitignore` and was there before the first commit
+- [ ] `git log -p | findstr /i "api_key password secret token"` finds nothing real
+- [ ] No real API keys in `.env.example`
+- [ ] No production passwords anywhere in the repository
+- [ ] Screenshots in the README show no keys, tokens or personal data
+- [ ] Any key that was ever committed has been revoked, not just deleted
+
+---
+
+### Terms
+
+**Secret** — any value that grants access. Keys, passwords, tokens, private keys.
+
+**Revoke** — invalidate a credential so it stops working, then issue a replacement. The
+correct response to any exposure.
+
+**Boundary** — where data crosses from somewhere you don't control into somewhere you do.
+The place validation belongs.
+
+**Injection** — an attack where input is interpreted as instructions rather than data.
+SQL injection is the classic; prompt injection is the same idea aimed at an LLM.
+
+**Prompt injection** — text that manipulates an AI into ignoring its instructions. Relevant
+here because our parser reads arbitrary user sentences. The defence is the same as
+everywhere else: the AI only ever proposes, and validation plus human confirmation stands
+between it and the database.
+
+**Least privilege** — give every component the minimum access it needs. The MCP server calls
+the HTTP API rather than the database, so it can only do what the API permits.
+
+**Defence in depth** — assume any single protection may fail, and layer them. Our expense
+path has four: schema validation, backend rules, human confirmation, and database
+constraints.
+
+---
+
+## 13. Running log
 
 A short note after each work session: what got built, what broke, what it taught us.
 
@@ -674,12 +901,54 @@ is much easier to debug once the plain path underneath it is known to work.
   returned zero expenses with no error anywhere. Found only by re-running the seed and then
   checking the API rather than the database.
 
-**Still open**
+**Resolved since**
 
-- The decisions table now says ~90 seed expenses while the older "Starting data" row in the
-  same table, and `build-plan.md`, still say ~30. The 97 that exist follow the newer choice.
+- Resolved: the "Starting data" row and `build-plan.md` both said ~30 seed expenses while the
+  newer "Trend chart" decision said ~90. All of them now say ~90, matching the 97 that exist.
+  Session 1's log below is left as written, because it records what was decided at the time.
 
 **Next**
 
 Hour 2: the `ExpenseParser` interface, the offline mock, the Claude and OpenAI adapters, and
 `POST /api/ai/parse-expense` — which returns a suggestion and saves nothing.
+
+### Session 3 — hour 2, the mock parser
+
+Built the offline half of the AI layer and stopped there, so the parser could be tested before
+any real provider existed to complicate the picture.
+
+**What got built**
+
+- The `ExpenseParser` interface, with both methods the decisions table calls for:
+  `parseExpense` and `summarizeMonth`.
+- The mock parser. No network, no key, no cost. It finds an amount and currency (including
+  European commas, so "23,40" is twenty-three forty), matches a category by keyword, guesses a
+  shop from capitalised words, and reads dates like "yesterday", "3 days ago", "last friday"
+  and "2026-07-14".
+- Provider selection from `AI_PROVIDER`, defaulting to mock. Asking for an adapter that does
+  not exist yet warns and falls back rather than refusing to start.
+- `POST /api/ai/parse-expense`, which returns a suggestion and saves nothing.
+
+**What it taught us**
+
+- The parser is deliberately imperfect and it shows: "spent 30 quid at Tesco" gets the amount,
+  the currency and the shop right and the category wrong. That is the argument for the confirm
+  step, made better by a live example than by any explanation.
+- Looking a word up in a plain object is not safe when the word came from a stranger.
+  "5 constructor" returned a JavaScript function where a currency code should have been,
+  because every object inherits a `constructor` property. `Object.hasOwn` is the fix.
+- The parser was picking "USD" out of "89.99 USD on Amazon" as the shop name. Merchant
+  guessing now refuses anything that is a currency word.
+
+**Verified**
+
+- Five parse requests in a row left the expense count at 97. The endpoint genuinely saves
+  nothing.
+- A full round trip: parse a sentence, correct the category the mock got wrong, confirm, and
+  the row lands with the GBP amount converted to euros.
+- `AI_PROVIDER=nonsense` is refused at startup; `AI_PROVIDER=claude` warns and uses the mock.
+
+**Next**
+
+The Claude and OpenAI adapters, both using structured output, both falling back to the mock
+when they error or time out.

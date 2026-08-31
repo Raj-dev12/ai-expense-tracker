@@ -20,14 +20,15 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Hour 2 — the AI layer
 
-- [ ] `ExpenseParser` interface defined
-- [ ] Mock parser works with no network access
+- [x] `ExpenseParser` interface defined
+- [x] Mock parser works with no network access
 - [ ] Claude adapter using structured output
 - [ ] OpenAI adapter using structured output
-- [ ] Provider chosen by environment variable, defaults to mock
-- [ ] Parser output validated with Zod before it leaves the backend
-- [ ] Falls back to mock when a real provider fails
-- [ ] `POST /api/ai/parse-expense` returns a suggestion and saves nothing
+- [x] Provider chosen by environment variable, defaults to mock
+- [x] Parser output validated with Zod before it leaves the backend
+- [~] Falls back to mock when a real provider fails — falls back when an adapter is missing;
+      the error and timeout paths arrive with the adapters themselves
+- [x] `POST /api/ai/parse-expense` returns a suggestion and saves nothing
 
 ## Hour 3 — the frontend
 
