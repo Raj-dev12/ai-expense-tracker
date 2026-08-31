@@ -79,9 +79,9 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 ## Finishing
 
 - [ ] `AI_PROVIDER` extra feature: monthly summary endpoint and button
-- [~] README written: architecture diagram, stack, two-command local setup, the AI
-      safety pattern, the no-key promise, and why the MCP server is not in compose.
-      Still has a placeholder where the screenshot goes.
+- [x] README written: screenshot, architecture diagram, stack, two-command local setup,
+      the AI safety pattern, the no-key promise, and why the MCP server is not in compose.
+      Also lists plainly what is not built yet.
 - [ ] `learnings.md` complete
 - [ ] Repository pushed to GitHub and made public
 

@@ -5,10 +5,10 @@ before anything is saved.
 
 ---
 
-<!-- Screenshot placeholder — replace this block with the real image once taken.
-     Save it as docs/screenshot.png and use:  ![The dashboard](docs/screenshot.png) -->
+![The single page: an add box, summary cards, a category breakdown, a weekly trend line and the recent expenses](docs/screenshot.png)
 
-> **Screenshot goes here.** `docs/screenshot.png` — not taken yet.
+<sub>Sample data. Each row in the recent list says where it came from — `added by seed`,
+`added by mcp` — which is the `source` column described further down.</sub>
 
 ---
 
