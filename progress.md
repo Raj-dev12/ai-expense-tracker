@@ -1,0 +1,84 @@
+# Progress
+
+What's built, what isn't. Updated as we go.
+
+Status key: `[ ]` not started · `[~]` in progress · `[x]` done
+
+---
+
+## Hour 1 — foundation
+
+- [ ] Repository created and first commit made
+- [ ] PostgreSQL running in Docker
+- [ ] Drizzle configured and connected
+- [ ] Schema written: users, categories, expenses
+- [ ] Migration applied
+- [ ] Seed script writes one demo user and ~30 expenses over 3 months
+- [ ] `GET /api/health` responds
+- [ ] Expenses CRUD works, verified with curl
+- [ ] Zod validation on every route
+
+## Hour 2 — the AI layer
+
+- [ ] `ExpenseParser` interface defined
+- [ ] Mock parser works with no network access
+- [ ] Claude adapter using structured output
+- [ ] OpenAI adapter using structured output
+- [ ] Provider chosen by environment variable, defaults to mock
+- [ ] Parser output validated with Zod before it leaves the backend
+- [ ] Falls back to mock when a real provider fails
+- [ ] `POST /api/ai/parse-expense` returns a suggestion and saves nothing
+
+## Hour 3 — the frontend
+
+- [ ] React and Vite project running
+- [ ] Tailwind configured
+- [ ] Natural-language add box
+- [ ] Interpretation shown as editable chips before saving
+- [ ] Confirm button saves via the validated endpoint
+- [ ] Summary cards
+- [ ] Category pie chart
+- [ ] Three-month trend line
+- [ ] Recent expenses list, original currency shown when not EUR
+
+## Hour 4 — MCP and exchange rates
+
+- [ ] MCP server scaffolded
+- [ ] `add_expense`
+- [ ] `list_expenses`
+- [ ] `search_expenses`
+- [ ] `get_spending_by_category`
+- [ ] `get_expense_summary`
+- [ ] `delete_expense`
+- [ ] Tool descriptions written clearly
+- [ ] Connected to an AI client and verified end to end
+- [ ] Exchange rates fetched and cached for 24 hours
+- [ ] Static fallback rates when the API is unreachable
+- [ ] Non-euro amounts converted before storage
+
+## Hour 5 — deployment
+
+- [ ] Dockerfiles for frontend, backend, MCP
+- [ ] `docker compose up` works locally
+- [ ] Caddyfile serves frontend and proxies `/api`
+- [ ] Hetzner server created, Finland region
+- [ ] Docker installed on the server
+- [ ] Repository deployed
+- [ ] sslip.io address resolving
+- [ ] HTTPS padlock showing
+- [ ] Seed script run in production
+
+## Finishing
+
+- [ ] `AI_PROVIDER` extra feature: monthly summary endpoint and button
+- [ ] README with screenshot, architecture diagram and local setup
+- [ ] `learnings.md` complete
+- [ ] Repository pushed to GitHub and made public
+
+---
+
+## Blockers
+
+Anything currently stuck, and what it's waiting on.
+
+_None yet._
