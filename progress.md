@@ -8,15 +8,15 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Hour 1 — foundation
 
-- [ ] Repository created and first commit made
-- [ ] PostgreSQL running in Docker
-- [ ] Drizzle configured and connected
-- [ ] Schema written: users, categories, expenses
-- [ ] Migration applied
-- [ ] Seed script writes one demo user and ~30 expenses over 3 months
-- [ ] `GET /api/health` responds
-- [ ] Expenses CRUD works, verified with curl
-- [ ] Zod validation on every route
+- [x] Repository created and first commit made
+- [x] PostgreSQL running in Docker
+- [x] Drizzle configured and connected
+- [x] Schema written: users, categories, expenses
+- [x] Migration applied
+- [x] Seed script writes one demo user and 97 expenses over 3 months
+- [x] `GET /api/health` responds
+- [x] Expenses CRUD works, verified with curl
+- [x] Zod validation on every route
 
 ## Hour 2 — the AI layer
 

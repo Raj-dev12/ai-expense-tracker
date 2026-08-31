@@ -215,6 +215,39 @@ a secret, it goes in `.env`, and `.env` never gets uploaded anywhere.
 A long secret password that identifies you to somebody else's service. If someone gets your
 AI provider's API key, they can spend your money. Treat it like a bank card number.
 
+**npm and package.json**
+npm is the tool that downloads and installs the libraries a project depends on. `package.json`
+lists them, along with the short command names in the `scripts` section — that is why
+`npm run db:seed` works rather than having to remember the full command behind it.
+
+**Monorepo**
+One repository holding several separate applications — here the backend, the frontend and
+the MCP server. Each has its own `package.json` and could run alone; keeping them together
+means a visitor sees the whole system in one place.
+
+**Connection pool**
+A small set of database connections kept open and handed out to requests as they need one.
+Opening a fresh connection for every request would take longer than the queries themselves.
+
+**HTTP status code**
+The three-digit number attached to every response. 200 means fine, 201 means something was
+created, 400 means the request was wrong, 404 means not found, 500 means the server broke.
+The distinction matters: 400 is the caller's problem, 500 is ours.
+
+**Query string**
+The part of a URL after the `?`, as in `/api/expenses?category=Groceries&limit=10`. Every
+value in it arrives as text, even the numbers, which is why they have to be converted before
+being checked.
+
+**Pagination (limit and offset)**
+Returning results in pages rather than all at once. `limit` is how many rows to send back,
+`offset` is how many to skip. Without it, a list endpoint gets slower every time a row is
+added.
+
+**Graceful shutdown**
+Closing database connections properly when the server is told to stop, instead of vanishing
+mid-request. Without it, a restart can leave connections stranded on the database.
+
 ---
 
 ## 6. Terms: the database
@@ -247,6 +280,21 @@ at one specific expense with certainty, even if two expenses look identical.
 A column that points at a row in *another* table. Our `expenses` table has a `user_id`
 that points at a row in `users`. This is how the database knows which expenses belong to whom.
 
+**Enum**
+A fixed list of allowed values. Our category is an enum: it can be Groceries or Transport
+or one of seven others, and nothing else. Enforcing this in Zod means a typo like
+"Grocerys" is rejected at the door rather than quietly creating a tenth category.
+
+**Floating point**
+How computers normally store decimal numbers — approximately. `0.1 + 0.2` genuinely does
+not equal `0.3` in most languages. Fine for physics, unacceptable for money, which is why
+we use a `numeric` column that stores exact decimals instead.
+
+**Time zone bugs**
+Servers usually run on UTC while people live somewhere else. If a container thinks it's
+already tomorrow, "yesterday" resolves to the wrong day. The fix is never to rely on
+whatever the machine defaults to — state the time zone explicitly everywhere.
+
 **ORM (Object-Relational Mapper)**
 A translator between your code and the database, so you can write normal-looking code
 instead of raw SQL. It also prevents a nasty class of attack called SQL injection.
@@ -264,6 +312,33 @@ database silently drift apart.
 **CRUD**
 Create, Read, Update, Delete — the four basic things you do to stored data. When someone
 says "just a CRUD app" they mean an app that only does these four things without anything clever.
+
+**UUID**
+A long random identifier like `9fe7d5c1-7025-46ad-90ec-739653167e6e`, used here as the id of
+every user and expense. The alternative is counting 1, 2, 3, which quietly tells anyone
+looking how many rows exist and makes it trivial to guess another row's address.
+
+**Index**
+A lookup structure the database maintains so it can find matching rows without reading the
+whole table. Ours covers user and date together, because nearly every query asks for one
+person's expenses within a date range. Indexes cost a little on every write and save a great
+deal on every read.
+
+**Decimal (numeric) column**
+A column type that stores numbers exactly rather than approximately. This is the fix for the
+floating point problem: `numeric(12,2)` means up to 12 digits with exactly 2 after the point,
+so money adds up correctly. Drizzle hands these values back as strings on purpose, because
+turning them into ordinary numbers would throw away the exactness.
+
+**Truncate**
+A SQL command that empties a table completely. The seed script uses it to reset before
+writing, which is precisely why it refuses to run without a flag being set deliberately.
+
+**Deterministic seed data**
+Our fake expenses come from a random number generator that always starts from the same
+number, so it produces the same 97 expenses every single time. Genuinely random data would
+mean the charts looked different in every screenshot and no bug involving particular data
+could ever be reproduced.
 
 ---
 
@@ -456,6 +531,16 @@ billing stops — most providers charge by the hour with a monthly cap.
 A free service that issues the certificates needed for HTTPS. Caddy talks to it for us
 automatically. Before it existed, certificates cost money and had to be renewed by hand.
 
+**Named volume**
+A storage area Docker manages and keeps separate from the container itself. Containers are
+disposable — deleting one is normal — so anything that must survive that, like the database
+files, lives in a named volume instead.
+
+**Health check**
+A trivial endpoint that answers "is this thing actually working". Ours runs a one-line query
+against the database, because a server that replies while its database is unreachable is
+still broken. Docker uses the same idea to decide when the database has finished starting.
+
 ---
 
 ## 10. Terms: tools we type into
@@ -530,6 +615,19 @@ want when someone asks you about the project in six months.
 | AI confirmation | Show the interpretation, let the user correct it before saving | The AI will sometimes be wrong. A confirm step turns that weakness into a visible feature and stops bad data reaching the database. It also makes a better demo — the audience watches a sentence become structured data. |
 | Charts | Pie for category share, line for the monthly trend | Recharts provides both cheaply. The trend line is what makes three months of seed data worthwhile. |
 | Pages | One single scrolling page | Removes routing entirely — no extra library, no navigation state, fewer moving parts. Three sections stacked: add, summary, history. |
+| Category storage | Text guarded by a Zod enum, not a foreign key | The enum already rejects invalid values before they reach the database. A foreign key would be a second lock on the same door. The `categories` table remains as the source of the dropdown list. |
+| Parser interface | Two methods: `parseExpense` and `summarizeMonth` | The original plan specified one, which left the monthly summary feature with no mock implementation — breaking the "runs without an API key" rule. |
+| Trend chart | Weekly buckets, ~90 seed expenses | Three monthly totals is three points, which is not a line. Thirty expenses a month is also a more realistic spending pattern than ten. |
+| Comparisons | Month-to-date vs the same number of days last month | Comparing a partial month against a complete one makes spending appear to collapse on the first of every month. |
+| Exchange rates | Frankfurter API, rate on the expense date | Free, no key, ECB data, history back to 1999. Using the historical rate is more correct than today's rate and costs nothing extra. The ECB publishes on business days only, so weekend dates fall back to the previous business day. |
+| MCP transport | stdio, running locally, calling the deployed HTTPS API | A stdio server is launched by the AI client on the user's own machine, so it cannot be a container on a remote VPS. It doesn't need to be — it reaches the live backend over the public API. Removes a Dockerfile and a category of deployment risk. |
+| Write protection | Rate limits, a row cap, and a nightly re-seed | A shared secret in the frontend is visible to anyone who reads the page source, so it protects nothing. Making the demo data self-healing is honest and actually works. |
+| Money precision | `numeric(12,2)` | Decimal, never floating point. |
+| Time zone | Europe/Helsinki, set explicitly everywhere | Containers default to UTC. Relying on that silently shifts "yesterday" by a day depending on the hour. |
+| Demo user lookup | One `getDemoUserId()` in a single module, looked up fresh on every request rather than cached; `user_id` is never read from the request | Keeps the one hardcoded assumption in one place, so adding real logins later changes that function and nothing else. Taking it from the request would be an open door with no login standing behind it. The lookup is deliberately not cached: the nightly re-seed replaces the demo user with a new id, and a cached one would leave the running server pointing at somebody who no longer exists — every query returning nothing, so the app looks empty rather than broken. |
+| Seed safety | The seed script refuses to run unless `ALLOW_SEED=true` is set | It empties the tables first. The nightly re-seed in production needs that to work on purpose, so the guard has to be a flag someone sets deliberately rather than a guess based on the environment name. |
+| Deletion | Real deletes, no `deleted_at` flag | Soft deletion would put a "and not deleted" condition into every single query for a feature nothing in the plan uses. `source` already records where a row came from, which is the provenance the demo actually needs. |
+| Confidence score | Shown as small muted text next to the interpretation; nothing behaves differently because of it | Gating on a threshold would invent interaction the plan never asked for. The confirm step already handles low confidence — the person reading it is the threshold. |
 
 ---
 
@@ -545,4 +643,43 @@ A short note after each work session: what got built, what broke, what it taught
 - Wrote the build plan.
 - Nothing built yet. Next session starts with the database and backend.
 
-### Session 2 — _to be filled in_
+### Session 2 — hour 1, the foundation
+
+Built the boring, load-bearing half of the backend, on the principle that the clever AI part
+is much easier to debug once the plain path underneath it is known to work.
+
+**What got built**
+
+- PostgreSQL 17 in Docker, with a named volume so the data survives the container.
+- The three tables, in Drizzle: `users`, `categories`, `expenses`. One migration, applied.
+- A seed script producing one demo user and 97 expenses across the last 90 days, weighted so
+  groceries and bills are the two biggest categories. Four of them are in other currencies,
+  so the euro conversion and the "show the original currency" display both have something
+  real to work with.
+- `GET /api/health`, and full CRUD for expenses, every input validated with Zod.
+- The static exchange rate table, built early because hour 4 needs it as its fallback anyway.
+
+**What it taught us**
+
+- Two bugs worth remembering, both found by testing rather than by reading the code:
+  JavaScript quietly turns `2026-02-31` into the 3rd of March instead of rejecting it, so a
+  day that never existed was reaching the database and coming back as a 500. Checking that a
+  parsed date still has the same year, month and day is what actually catches it.
+- Stacked validation rules produce stacked error messages. Three complaints about one bad
+  date is worse than one, so the date checks now stop at the first failure.
+- Seed data is read by people. Pairing each merchant with its own descriptions took two
+  minutes and removed lines like "IKEA — running shoes".
+- Caching the demo user id looked like an obvious saving and was the worst bug of the three:
+  re-seeding while the server ran left it filtering on a deleted user, so the API cheerfully
+  returned zero expenses with no error anywhere. Found only by re-running the seed and then
+  checking the API rather than the database.
+
+**Still open**
+
+- The decisions table now says ~90 seed expenses while the older "Starting data" row in the
+  same table, and `build-plan.md`, still say ~30. The 97 that exist follow the newer choice.
+
+**Next**
+
+Hour 2: the `ExpenseParser` interface, the offline mock, the Claude and OpenAI adapters, and
+`POST /api/ai/parse-expense` — which returns a suggestion and saves nothing.

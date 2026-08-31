@@ -1,0 +1,25 @@
+# Hour 1 runs only the database. The backend, frontend, MCP server and Caddy
+# get added here in hour 5, once each of them works on its own.
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: expense-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-expense}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-expense_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-expenses}
+      TZ: ${TZ:-Europe/Helsinki}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-expense} -d ${POSTGRES_DB:-expenses}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
