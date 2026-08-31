@@ -36,6 +36,35 @@ export function formatMoneyShort(value: number, currency: string): string {
   return formatter(short, currency, 0).format(value);
 }
 
+/**
+ * Today, in this browser's time zone, as YYYY-MM-DD.
+ *
+ * "en-CA" formats dates in exactly that shape, which is the same trick the
+ * backend uses. Building it from the local parts rather than slicing an ISO
+ * string matters: `toISOString()` is UTC, so late in the evening east of
+ * Greenwich it names tomorrow.
+ */
+const isoDay = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function todayIso(): string {
+  return isoDay.format(new Date());
+}
+
+/** "2026-08-24" becomes "Monday, 24 August". */
+const fullDay = new Intl.DateTimeFormat("en-GB", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+export function formatFullDay(iso: string): string {
+  return fullDay.format(new Date(`${iso}T00:00:00Z`));
+}
+
 const dayMonth = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
 /** "2026-08-24" becomes "24 Aug". Parsed as UTC so the day never shifts. */

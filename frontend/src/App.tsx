@@ -27,11 +27,12 @@ import {
   type Summary,
   type Trend,
 } from "./api";
-import { formatMoney } from "./format";
+import { formatMoney, todayIso } from "./format";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie } from "./components/CategoryPie";
+import { DayView } from "./components/DayView";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
@@ -136,6 +137,29 @@ export default function App() {
    * parallel. The error lives here too, so it can be shown inside the open row
    * rather than at the top of the page, away from the thing that failed.
    */
+  /**
+   * The day view: which day, and what was spent on it.
+   *
+   * Fetched separately from the dashboard because it answers a different
+   * question and changes for a different reason — moving to another day should
+   * not refetch the charts, and saving an expense should not reset the day you
+   * were looking at.
+   */
+  const [day, setDay] = useState(todayIso);
+  const [dayExpenses, setDayExpenses] = useState<Expense[]>([]);
+  const [dayLoading, setDayLoading] = useState(true);
+  /**
+   * Bumped whenever anything is written, so the day view refetches without the
+   * dashboard's refresh needing to know which day is on screen. The alternative
+   * — putting `day` in refresh's dependencies — would refetch all ninety-odd
+   * expenses and both charts every time somebody changed the date.
+   *
+   * The cost is one duplicated day request on first load, because the initial
+   * refresh bumps this too. That is cheaper than bumping it from each of the
+   * seven write handlers, where the bug would be forgetting one.
+   */
+  const [writes, setWrites] = useState(0);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -148,10 +172,12 @@ export default function App() {
    * expense feel four times slower than it is.
    */
   const refresh = useCallback(async () => {
+    setWrites((count) => count + 1);
+
     try {
       const [list, nextSummary, nextCategories, nextTrend, settings, allCategories] =
         await Promise.all([
-            listExpenses(EXPENSE_LIMIT),
+              listExpenses({ limit: EXPENSE_LIMIT }),
           getSummary(),
           getCategories(),
           getTrend(),
@@ -178,6 +204,30 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDayLoading(true);
+
+    // A day is a range whose ends are the same date, which is why this needs no
+    // endpoint of its own.
+    listExpenses({ from: day, to: day, limit: EXPENSE_LIMIT })
+      .then((result) => {
+        // Changing the date twice quickly can land the replies out of order, and
+        // the slower one would overwrite the day actually on screen.
+        if (!cancelled) setDayExpenses(result.expenses);
+      })
+      .catch(() => {
+        if (!cancelled) setDayExpenses([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDayLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [day, writes]);
 
   async function handleParse(event: React.FormEvent) {
     event.preventDefault();
@@ -496,6 +546,14 @@ export default function App() {
               )}
               {trend && <TrendChart points={trend.points} currency={currency} />}
             </div>
+
+            <DayView
+              date={day}
+              expenses={dayExpenses}
+              currency={currency}
+              loading={dayLoading}
+              onDateChange={setDay}
+            />
 
             <RecentExpenses
               expenses={recent}

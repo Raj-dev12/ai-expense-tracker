@@ -1041,6 +1041,10 @@ want when someone asks you about the project in six months.
 | Uncategorised cannot be renamed either | Alongside the existing rule that it cannot be deleted | The delete flow moves expenses there *by name*, and the parse endpoint falls back to it by name. Renaming it would break both, silently, at the moment somebody next deleted a category. |
 | The expense list loads everything in one request | `limit=200`, scrolling inside a fixed height | A hundred rows is nothing to fetch or draw, and paging would add a scroll listener, a loading state and an off-by-one to save work that is already free. The fixed height is the load-bearing part: an unbounded list pushes the charts and the categories panel off the bottom of the page. The header still says "showing 200 of 500" when the cap bites, because a list that quietly dropped rows would be worse than one that admits it. |
 | A check script owns its writes until they are gone | The MCP check sweeps in a `finally`, and again at startup | It writes to a real database. A run that died between creating its rows and deleting them left them behind, and the next run failed a check about a mess it had not made — a worse failure than the original, because it points at the wrong thing. The finally covers a throw; the startup sweep covers the process being killed, which no finally survives. The marker lives in the data (`Tool check` in the merchant name) rather than in a variable, so a crash cannot lose track of what to remove. |
+| The day view reuses `GET /api/expenses` | `from` and `to` both set to the same date | A single day is a range whose ends match, so the endpoint already answers it. A dedicated route would be a second way to ask one question, and a second place for the answer to drift — the same reasoning that kept text search in the backend rather than in the MCP server. |
+| A table for one day, stacked rows for the list | Different components, deliberately | The main list holds a hundred rows of varying length, where stacked rows read better than columns. A day holds a handful, where the amounts and categories line up into columns you can read down — which is what looking at one day is for. |
+| The day view has its own fetch, driven by a write counter | The effect depends on `[day, writes]`; `refresh` bumps `writes` | Moving to another day must not refetch the charts, and saving an expense must not reset the day on screen. Putting `day` into `refresh`'s dependencies would have refetched every expense and both charts on each date change. Bumping a counter inside `refresh` costs one duplicated request on first load and saves seven write handlers each having to remember the day view exists. |
+| Today comes from `Intl`, not `toISOString()` | `Intl.DateTimeFormat("en-CA")` on local time | `toISOString()` is UTC, so any evening east of Greenwich it names tomorrow and the picker would open on a day that has not started. Same trick the backend already uses for its own time zone. |
 
 ---
 
@@ -2566,3 +2570,67 @@ anything else.
 until the happy path finishes. The cleanup belongs in a `finally`, and anything a `finally`
 cannot reach needs a way to be found later — which means the marker lives in the data rather
 than in memory.
+
+### Session 24 — the day view, built out of an endpoint that already existed
+
+**No new endpoint**
+
+A single day is a range whose ends are the same date, so `GET /api/expenses?from=X&to=X` is
+already the answer. The brief said so and it was right: adding `/api/expenses/day/:date`
+would have been a second way to ask a question the API can answer, and a second place for
+that answer to drift.
+
+The only change on the backend side was none. `listExpenses` in the browser gained optional
+`from` and `to`, and the day view passes the same date to both.
+
+**A table, because a day is short**
+
+The main list uses stacked rows: a merchant on one line, category and date underneath. That
+is right for a hundred rows of varying length, and wrong for eight — with a handful of rows
+the amounts and categories line up into columns you can read down, which is the entire point
+of looking at one day.
+
+So the day view is a real `<table>`, with a footer total. A column of amounts and no sum at
+the bottom is a table asking to be added up by hand.
+
+**Fetching it separately, and the counter that keeps it fresh**
+
+The day view answers a different question from the dashboard and changes for a different
+reason. Moving to another day should not refetch the charts; saving an expense should not
+reset the day being looked at.
+
+The obvious approach — putting `day` in `refresh`'s dependency list — would refetch all
+ninety-odd expenses and both charts every time somebody changed the date. Instead a counter
+is bumped inside `refresh`, and the day effect depends on `[day, writes]`. Any write already
+calls `refresh`, so the day view stays current without each of the seven write handlers
+having to remember it.
+
+It costs one duplicated day request on first load, because the initial refresh bumps the
+counter too. That is a better trade than seven places to forget.
+
+**A race worth handling in eight lines**
+
+Changing the date twice quickly can land the replies out of order, and the slower one would
+overwrite the day actually on screen. The effect's cleanup sets a `cancelled` flag that every
+branch checks before touching state — the standard shape, and cheap enough that leaving it
+out is not worth the argument.
+
+**`toISOString()` is the wrong "today"**
+
+The date picker defaults to today, and today has to be the browser's today.
+`new Date().toISOString().slice(0, 10)` is UTC, so any evening east of Greenwich it names
+tomorrow — the app would open on a day that has not started. `Intl.DateTimeFormat("en-CA")`
+formats local time in exactly `YYYY-MM-DD`, which is the same trick the backend already uses
+for its own time zone.
+
+**A check that was wrong again**
+
+`day: names the day in full` failed, expecting `Monday, 31 August`. `en-GB` writes it without
+a comma. The component was right and the assertion was not — which is now the fifth time in
+this project that a failing check turned out to be the check's fault rather than the code's.
+
+**Verified**
+
+Against real data, the exact query the view makes: 31 August returns one expense totalling
+56.00, 4 July returns three totalling 81.79, and an empty day returns nothing and says so.
+Nine new render checks, 67 backend tests, three typechecks, all seven MCP tools over stdio.

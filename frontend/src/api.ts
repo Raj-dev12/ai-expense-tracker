@@ -202,8 +202,22 @@ export function updateExpense(id: string, patch: ExpensePatch): Promise<Expense>
   });
 }
 
-export function listExpenses(limit = 5): Promise<{ expenses: Expense[]; total: number }> {
-  return request(`/api/expenses?limit=${limit}`, expenseListSchema);
+/**
+ * List expenses, optionally within a date range.
+ *
+ * `from` and `to` are the endpoint's own filters, and the day view uses them by
+ * pointing both at the same date — a single day is just a range with the same
+ * endpoints, so it needs no endpoint of its own. Anything the API can already
+ * answer should not grow a second way to ask it.
+ */
+export function listExpenses(
+  options: { limit?: number; from?: string; to?: string } = {},
+): Promise<{ expenses: Expense[]; total: number }> {
+  const query = new URLSearchParams({ limit: String(options.limit ?? 5) });
+  if (options.from) query.set("from", options.from);
+  if (options.to) query.set("to", options.to);
+
+  return request(`/api/expenses?${query}`, expenseListSchema);
 }
 
 /** Delete an expense. There is no undo, so the interface confirms first. */

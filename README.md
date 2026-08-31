@@ -20,8 +20,8 @@ an AI parser, which returns a *suggestion*: an amount, a currency, a merchant, a
 a date. The page shows that suggestion as editable chips so you can correct anything it got
 wrong, and only when you press confirm does the browser call the ordinary, validated endpoint
 that writes a row. Below the box, a dashboard shows the month's total against the same
-stretch of last month, a pie of where the money went, a fourteen-week trend line, and every
-expense in a list that scrolls inside its own box. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
+stretch of last month, a pie of where the money went, a fourteen-week trend line, a table of any single day you
+pick, and every expense in a list that scrolls inside its own box. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
 and every amount is shown in it; changing it later moves no stored number. A
 button asks the AI to describe the month in a sentence or two, and the card underneath it says
 which parser actually wrote that sentence. Any row in the list can be corrected in place or deleted,
@@ -269,6 +269,7 @@ cd mcp && npm install && npm run build
 GET    /api/health
 POST   /api/expenses
 GET    /api/expenses            from, to, category, minAmount, search, limit, offset
+                                the day view is this, with from and to set to the same date
 GET    /api/expenses/:id
 PATCH  /api/expenses/:id      change any field; omitted fields are left alone
 DELETE /api/expenses/:id

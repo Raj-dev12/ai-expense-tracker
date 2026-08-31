@@ -32,6 +32,7 @@ in Docker, behind HTTPS.
 | Pages | One scrolling page. No routing. |
 | Categories | Editable, not fixed. The interface can add, rename and remove them, all in one panel. |
 | Deleting | Expenses can be deleted from the interface, after a confirmation showing what goes. Deleting a category asks what to do with the expenses in it. |
+| Day view | A table of one day at a time, with a date picker. Still one page — it reuses `GET /api/expenses` with `from` and `to` set to the same date rather than adding an endpoint. |
 
 ---
 

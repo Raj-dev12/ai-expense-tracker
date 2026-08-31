@@ -116,6 +116,8 @@ Asked for after the build plan was written, and built on request rather than sug
       rather than growing the page
 - [x] The MCP check script cleans up after itself even when it throws: a sweep in a finally,
       and another at startup for the case a finally cannot cover — proved by sabotaging it
+- [x] Day view: a table of one day with a date picker, reusing `GET /api/expenses` with
+      `from` and `to` set to the same date rather than adding an endpoint
 
 ## Finishing
 

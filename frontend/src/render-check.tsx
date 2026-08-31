@@ -26,6 +26,7 @@ import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
+import { DayView } from "./components/DayView";
 import { buildPatch } from "./components/ExpenseEditor";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
@@ -493,6 +494,42 @@ const partial = renderToStaticMarkup(
   <RecentExpenses expenses={expenses} total={500} {...listProps} />,
 );
 check("list: still says showing N of M when it does not", partial.includes("showing 2 of 500"));
+
+// 18. The day view: one day, as a table.
+const dayFull = renderToStaticMarkup(
+  <DayView
+    date="2026-08-31"
+    expenses={expenses}
+    currency="EUR"
+    loading={false}
+    onDateChange={() => {}}
+  />,
+);
+// en-GB writes this without a comma: "Monday 31 August".
+check("day: names the day in full", dayFull.includes("Monday 31 August"));
+check("day: is a real table", dayFull.includes("<table") && dayFull.includes("<thead"));
+check(
+  "day: has the columns a day needs",
+  ["What", "Category", "Amount"].every((heading) => dayFull.includes(`>${heading}</th>`)),
+);
+check("day: has a date picker set to the day shown", dayFull.includes('type="date"') && dayFull.includes('value="2026-08-31"'));
+check("day: counts what it holds", dayFull.includes("2 expenses"));
+// A column of amounts with no sum is a table asking to be added up by hand.
+check("day: totals the day", dayFull.includes(">Total</td>") && dayFull.includes("47.60"));
+check("day: marks a row that came from elsewhere", dayFull.includes("added by mcp"));
+
+const dayEmpty = renderToStaticMarkup(
+  <DayView date="2026-08-30" expenses={[]} currency="EUR" loading={false} onDateChange={() => {}} />,
+);
+check(
+  "day: an empty day says so rather than showing an empty table",
+  dayEmpty.includes("Nothing spent on this day") && !dayEmpty.includes("<table"),
+);
+
+const dayGbp = renderToStaticMarkup(
+  <DayView date="2026-08-31" expenses={expenses} currency="GBP" loading={false} onDateChange={() => {}} />,
+);
+check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.includes("€"));
 
 // 15. Requests only announce JSON when they are actually sending some.
 //
