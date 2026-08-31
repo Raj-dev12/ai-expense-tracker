@@ -211,11 +211,12 @@ export function updateExpense(id: string, patch: ExpensePatch): Promise<Expense>
  * answer should not grow a second way to ask it.
  */
 export function listExpenses(
-  options: { limit?: number; from?: string; to?: string } = {},
+  options: { limit?: number; from?: string; to?: string; category?: string } = {},
 ): Promise<{ expenses: Expense[]; total: number }> {
   const query = new URLSearchParams({ limit: String(options.limit ?? 5) });
   if (options.from) query.set("from", options.from);
   if (options.to) query.set("to", options.to);
+  if (options.category) query.set("category", options.category);
 
   return request(`/api/expenses?${query}`, expenseListSchema);
 }
@@ -337,12 +338,15 @@ export type Trend = z.infer<typeof trendSchema>;
 export type CategorySlice = CategoryBreakdown["categories"][number];
 export type TrendPoint = Trend["points"][number];
 
-export function getSummary(): Promise<Summary> {
-  return request("/api/analytics/summary", summarySchema);
+/** A window, defaulting on the server to this calendar month so far. */
+export function getSummary(window?: { from: string; to: string }): Promise<Summary> {
+  const query = window ? `?from=${window.from}&to=${window.to}` : "";
+  return request(`/api/analytics/summary${query}`, summarySchema);
 }
 
-export function getCategories(): Promise<CategoryBreakdown> {
-  return request("/api/analytics/categories", categoryBreakdownSchema);
+export function getCategories(window?: { from: string; to: string }): Promise<CategoryBreakdown> {
+  const query = window ? `?from=${window.from}&to=${window.to}` : "";
+  return request(`/api/analytics/categories${query}`, categoryBreakdownSchema);
 }
 
 // --- settings ----------------------------------------------------------------
@@ -394,15 +398,19 @@ const monthlySummarySchema = z.object({
   // for a summary must not change anything.
   saved: z.literal(false),
   month: z.string(),
+  // The window the sentence describes, so the card can say what it summarised
+  // rather than assuming a month.
+  from: z.string(),
+  to: z.string(),
   summary: z.string(),
 });
 
 export type MonthlySummary = z.infer<typeof monthlySummarySchema>;
 
-/** Ask for a written summary of this month. Saves nothing. */
-export function getMonthlySummary(): Promise<MonthlySummary> {
+/** Ask for a written summary of a window. Saves nothing. */
+export function getMonthlySummary(window?: { from: string; to: string }): Promise<MonthlySummary> {
   return request("/api/ai/monthly-summary", monthlySummarySchema, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(window ?? {}),
   });
 }

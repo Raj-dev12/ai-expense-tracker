@@ -22,6 +22,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createCategory, deleteCategory, deleteExpense } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
+import { windowFor } from "./periods";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
@@ -154,7 +155,7 @@ check(
   merged.filter((s) => s.category === "Other").length === 1,
 );
 
-const pie = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="EUR" />);
+const pie = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="EUR" selected={null} selectedExpenses={[]} selectedLoading={false} onSelect={() => {}} onDismiss={() => {}} />);
 check("pie: legend names each category", pie.includes("Groceries") && pie.includes("Bills"));
 check("pie: legend carries the amount as text", pie.includes("500.00"));
 check("pie: legend carries the share", pie.includes("%"));
@@ -171,7 +172,7 @@ check(
   "a viewport breakpoint cannot know how wide this card is",
 );
 
-const emptyPie = renderToStaticMarkup(<CategoryPie categories={[]} from="2026-08-01" currency="EUR" />);
+const emptyPie = renderToStaticMarkup(<CategoryPie categories={[]} from="2026-08-01" currency="EUR" selected={null} selectedExpenses={[]} selectedLoading={false} onSelect={() => {}} onDismiss={() => {}} />);
 check("pie: empty month says so", emptyPie.includes("Nothing recorded this month yet"));
 
 // 6. The trend chart.
@@ -227,27 +228,35 @@ check("list: says how many of how many", list.includes("showing 2 of 97"));
 // a real provider wrote something the mock produced.
 const idle = renderToStaticMarkup(
   <MonthlySummary
-    month="2026-08-01"
+    period="month"
+    onPeriodChange={() => {}}
     summary={null}
+    writtenAt={null}
     loading={false}
     error={null}
     onRequest={() => {}}
   />,
 );
-check("summary: names the month", idle.includes("August in words"));
+// The heading is a period dropdown now, not a fixed month.
+check("summary: the period is chosen, not fixed", idle.includes("This month") && idle.includes("in words"));
+check("summary: every period is offered", ["Today", "This week", "This month", "This quarter", "This half year", "Last three quarters", "This year"].every((label) => idle.includes(label)));
 check("summary: button invites a first run", idle.includes("Summarise this month"));
 // apostrophes are HTML-escaped in the markup, so the assertion stops short of one
-check("summary: says what the button will do", idle.includes("describe this month"));
+check("summary: says what the button will do", idle.includes("describe this spending"));
 
 const written = renderToStaticMarkup(
   <MonthlySummary
-    month="2026-08-01"
+    period="month"
+    onPeriodChange={() => {}}
     summary={{
       provider: "mock",
       saved: false,
       month: "2026-08-01",
+      from: "2026-08-01",
+      to: "2026-08-31",
       summary: "In August 2026 you spent €1854.45 across 31 expenses.",
     }}
+    writtenAt={new Date("2026-08-31T22:41:00Z")}
     loading={false}
     error={null}
     onRequest={() => {}}
@@ -263,8 +272,10 @@ check("summary: offers to rewrite once written", written.includes("Write it agai
 // the field that tells the truth about it.
 const byClaude = renderToStaticMarkup(
   <MonthlySummary
-    month="2026-08-01"
-    summary={{ provider: "claude", saved: false, month: "2026-08-01", summary: "A sentence." }}
+    period="month"
+    onPeriodChange={() => {}}
+    summary={{ provider: "claude", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
+    writtenAt={new Date("2026-08-31T22:41:00Z")}
     loading={false}
     error={null}
     onRequest={() => {}}
@@ -275,8 +286,10 @@ check("summary: does not also claim the mock", !byClaude.includes("mock"));
 
 const failed = renderToStaticMarkup(
   <MonthlySummary
-    month="2026-08-01"
+    period="month"
+    onPeriodChange={() => {}}
     summary={null}
+    writtenAt={null}
     loading={false}
     error="Could not write a summary"
     onRequest={() => {}}
@@ -286,8 +299,10 @@ check("summary: an error is shown in the card", failed.includes("Could not write
 
 const writing = renderToStaticMarkup(
   <MonthlySummary
-    month="2026-08-01"
+    period="month"
+    onPeriodChange={() => {}}
     summary={null}
+    writtenAt={null}
     loading={true}
     error={null}
     onRequest={() => {}}
@@ -377,7 +392,7 @@ const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="
 check("currency: cards use the base symbol", cardsGbp.includes("£1,836.95"), cardsGbp.match(/[£€][0-9,.]+/)?.[0] ?? "none");
 check("currency: cards do not still say euro", !cardsGbp.includes("€"));
 
-const pieGbp = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="GBP" />);
+const pieGbp = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01" currency="GBP" selected={null} selectedExpenses={[]} selectedLoading={false} onSelect={() => {}} onDismiss={() => {}} />);
 check("currency: the pie legend follows the base", pieGbp.includes("£500.00"));
 check("currency: the pie legend drops the euro", !pieGbp.includes("€"));
 
@@ -530,6 +545,99 @@ const dayGbp = renderToStaticMarkup(
   <DayView date="2026-08-31" expenses={expenses} currency="GBP" loading={false} onDateChange={() => {}} />,
 );
 check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.includes("€"));
+
+// 19. A re-run of the summary is visible even when the words are identical.
+//
+// The reported bug was "it works once and then goes dead". It was not dead: the
+// parser is deterministic, so a second press returned the same sentence and
+// nothing on the card changed. These assert the two things that now differ.
+const rerunning = renderToStaticMarkup(
+  <MonthlySummary
+    period="month"
+    onPeriodChange={() => {}}
+    summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
+    writtenAt={new Date("2026-08-31T20:41:00Z")}
+    loading={true}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+check("summary: a re-run replaces the sentence while it works", rerunning.includes("Writing it again"));
+check("summary: the old sentence is not left sitting there", !rerunning.includes("A sentence."));
+
+const reWritten = renderToStaticMarkup(
+  <MonthlySummary
+    period="month"
+    onPeriodChange={() => {}}
+    summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
+    writtenAt={new Date("2026-08-31T20:41:00Z")}
+    loading={false}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+// The clock is the only thing that changes when the words do not.
+check("summary: says when it was written", /\d\d?:\d\d/.test(reWritten), reWritten.match(/\d\d?:\d\d[:\d]*/)?.[0] ?? "no time found");
+
+// 20. The pie opens a panel for a category.
+const pieOpen = renderToStaticMarkup(
+  <CategoryPie
+    categories={nine}
+    from="2026-08-01"
+    currency="EUR"
+    selected="Groceries"
+    selectedExpenses={expenses}
+    selectedLoading={false}
+    onSelect={() => {}}
+    onDismiss={() => {}}
+  />,
+);
+check("pie: the panel names the category and the period", pieOpen.includes("Groceries") && pieOpen.includes("August"));
+check("pie: the panel lists that category's expenses", pieOpen.includes("Tesco") && pieOpen.includes("Fafa"));
+check("pie: the panel can be closed", pieOpen.includes(">Close</button>"));
+// The legend rows are buttons because an SVG pie slice cannot be reached with a
+// keyboard. Same action, same panel.
+check("pie: the legend is keyboard reachable", pieOpen.includes('aria-expanded="true"'));
+
+const pieEmptyPanel = renderToStaticMarkup(
+  <CategoryPie
+    categories={nine}
+    from="2026-08-01"
+    currency="EUR"
+    selected="Travel"
+    selectedExpenses={[]}
+    selectedLoading={false}
+    onSelect={() => {}}
+    onDismiss={() => {}}
+  />,
+);
+check("pie: an empty category says so", pieEmptyPanel.includes("Nothing in this category"));
+check("pie: nothing is open until something is picked", !pie.includes(">Close</button>"));
+
+// 21. The calendar periods.
+//
+// Pure arithmetic and the part most likely to be quietly wrong, so it is checked
+// against fixed dates rather than against whatever today happens to be. Every
+// period ends today and starts at the beginning of its calendar block.
+//
+// 2026-08-31 is a Monday in Q3.
+const w = (period: Parameters<typeof windowFor>[0]) => windowFor(period, "2026-08-31");
+check("period: today is one day", w("day").from === "2026-08-31" && w("day").to === "2026-08-31");
+check("period: the week starts on Monday", w("week").from === "2026-08-31", w("week").from);
+check("period: the month starts on the first", w("month").from === "2026-08-01", w("month").from);
+check("period: Q3 starts in July", w("quarter").from === "2026-07-01", w("quarter").from);
+check("period: the second half starts in July", w("half").from === "2026-07-01", w("half").from);
+check("period: three quarters back from Q3 is January", w("threeQuarters").from === "2026-01-01", w("threeQuarters").from);
+check("period: the year starts in January", w("year").from === "2026-01-01", w("year").from);
+check("period: every period ends today", ["day", "week", "month", "quarter", "half", "threeQuarters", "year"].every((p) => w(p as Parameters<typeof windowFor>[0]).to === "2026-08-31"));
+
+// A Sunday must belong to the week that began the Monday before, not start a
+// new one — the trap in every week calculation.
+check("period: Sunday belongs to the week that began on Monday", windowFor("week", "2026-08-30").from === "2026-08-24", windowFor("week", "2026-08-30").from);
+// Crossing a year boundary: in Q1, three quarters back lands in the previous year.
+check("period: three quarters back from Q1 crosses the year", windowFor("threeQuarters", "2026-02-10").from === "2025-07-01", windowFor("threeQuarters", "2026-02-10").from);
+check("period: the first half starts in January", windowFor("half", "2026-02-10").from === "2026-01-01");
+check("period: Q2 starts in April", windowFor("quarter", "2026-05-05").from === "2026-04-01");
 
 // 15. Requests only announce JSON when they are actually sending some.
 //

@@ -1045,6 +1045,13 @@ want when someone asks you about the project in six months.
 | A table for one day, stacked rows for the list | Different components, deliberately | The main list holds a hundred rows of varying length, where stacked rows read better than columns. A day holds a handful, where the amounts and categories line up into columns you can read down — which is what looking at one day is for. |
 | The day view has its own fetch, driven by a write counter | The effect depends on `[day, writes]`; `refresh` bumps `writes` | Moving to another day must not refetch the charts, and saving an expense must not reset the day on screen. Putting `day` into `refresh`'s dependencies would have refetched every expense and both charts on each date change. Bumping a counter inside `refresh` costs one duplicated request on first load and saves seven write handlers each having to remember the day view exists. |
 | Today comes from `Intl`, not `toISOString()` | `Intl.DateTimeFormat("en-CA")` on local time | `toISOString()` is UTC, so any evening east of Greenwich it names tomorrow and the picker would open on a day that has not started. Same trick the backend already uses for its own time zone. |
+| Periods are calendar, not rolling | "This quarter" is 1 July to today, not the last ninety days | It is how people talk about a quarter or a year, and the only reading that lets one period line up with the one before it. Rolling windows smooth noise, which is a different job from the one this dashboard has. Every period ends *today* rather than at its block's end, because a quarter two months old drawn to 30 September would show a third of itself empty. |
+| The comparison is "the same days immediately before" | Not "the same days of the previous calendar quarter" | One sentence the server can apply to any window, so it never has to learn what a quarter is — the seven period names stay in the dropdown that offers them. For month-to-date it reproduces the previous behaviour exactly, so nothing about the existing cards changed when periods arrived. |
+| One period governs cards, prose and pie | The trend chart deliberately ignores it | Numbers, sentence and slices that could describe different stretches would be worse than no period control at all. The trend is about change over a long run; squeezing it into "today" would leave a single point. |
+| The window label carries its own preposition | "In August 2026", "On 31 August 2026", "In the period 1 July to 31 August 2026" | A day takes "on", a month takes "in", and a caller that had to choose would get one of the three wrong. The label exists to be dropped into a sentence, so fitting the sentence is its job. |
+| The summary card stamps the time it was written | Alongside the provider credit | The parser is deterministic: asked twice about unchanged figures it returns the identical sentence, so a re-run left the card looking exactly as it did — which is precisely how it was reported as broken. The clock is the only thing that can change when the words cannot. |
+| The pie panel opens on click and closes on click | Not on hover | A panel that vanishes when the pointer drifts cannot be read to the end, cannot be scrolled, and does not exist on a touchscreen. Clicking to open and clicking away to close is the contract a menu has, and it works with a finger. The legend rows are buttons because an SVG slice cannot be reached with a keyboard. |
+| Builds are run emitting, not just `--noEmit` | `npm run build` in the gate, and never piped to `tail` | A syntax error slipped past a typecheck that had been run before the edit and not after, the Docker build failed, and `docker compose up -d --build` started the previous image anyway — healthcheck green, stale code. A failed build and a successful one both end with a container starting; the difference is in the lines `tail` throws away. |
 
 ---
 
@@ -2634,3 +2641,97 @@ this project that a failing check turned out to be the check's fault rather than
 Against real data, the exact query the view makes: 31 August returns one expense totalling
 56.00, 4 July returns three totalling 81.79, and an empty day returns nothing and says so.
 Nine new render checks, 67 backend tests, three typechecks, all seven MCP tools over stdio.
+
+### Session 25 — a button that was never broken, calendar periods, and a build that failed in silence
+
+**The summary button was not dead**
+
+Reported as "works once and then goes dead, I have to refresh the page". Reproduced in the
+jsdom harness with the requests instrumented:
+
+```
+first  press...   requests so far: 1
+second press...   requests so far: 2
+Did the visible card change between press 1 and press 2? NO — identical text
+```
+
+The handler fired both times. The mock parser is **deterministic**: asked twice about
+unchanged figures it returns byte-identical prose, so the second press replaced the sentence
+with the same sentence. On localhost the request takes about thirty milliseconds, so the
+"Writing..." label flashes past unseen. Nothing changes, so it reads as broken.
+
+And that is why refreshing appeared to fix it. After a reload the card is showing its
+placeholder, so the first press produces a *visible* transition — placeholder to sentence.
+The work was identical both times; only one of them looked like work.
+
+**Not the same class as the add-box bug**, which was a genuine React defect: state copied
+into `useState` initial values that were never re-read, fixed with a changing `key`. This one
+is a feedback bug, and the fix is feedback: the sentence is replaced by "Writing it again..."
+while the request is out, and the credit line now carries the time it was written. A re-run
+is visible even when the words are not.
+
+**Calendar periods, and the one rule that made the server simple**
+
+Seven periods, all calendar: each runs from the start of its block to *today*, never to the
+block's end — a quarter is two months old on 31 August, and drawing it as though it ran to
+30 September would show a third of it empty.
+
+The comparison window is where this could have got complicated. Rather than teaching the
+server what a "quarter" is, the rule is one sentence: **the same number of days, immediately
+before the window started.** For month-to-date that reproduces the old behaviour exactly —
+1–31 August still compares against 1–31 July — so nothing about the existing cards changed,
+and the seven period names stay in the one place that has to know them, which is the dropdown
+offering them.
+
+Worth expecting rather than reporting: on 31 August 2026 the quarter and the half year both
+begin on 1 July, because the second half starts when the third quarter does. Different
+questions, same answer that day.
+
+**The premise that did not hold**
+
+The brief said "the summary endpoint already takes from and to". It did not. Both
+`summaryQuerySchema` and `monthlySummaryRequestSchema` were `z.strictObject({})` — the pie
+and the trend took a window, the two summaries took nothing at all. Checking that before
+building turned a wiring job into a backend change, which is a better thing to find at the
+start than halfway through.
+
+**Three wording bugs the periods exposed**
+
+All of them latent, all invisible while the only period was a month:
+
+- `"In 1 July 2026 to 31 August 2026 you spent"` — not a sentence
+- `"That is 170% more than the month before"` — hardcoded, and a quarter is not a month
+- `"across 1 expenses"` — no pluralisation, and only a single day ever has one
+
+The fix for the first was to let the label carry its own preposition: `In August 2026`,
+`On 31 August 2026`, `In the period 1 July to 31 August 2026`. A single day takes "on", a
+month takes "in", and a caller that had to guess would get one of the three wrong.
+
+**The build was failing and compose started the old image anyway**
+
+The worst part of this session. A `node -e` edit to `prompt.ts` produced unescaped nested
+double quotes. `npm run build` failed with a syntax error, `docker compose up -d --build`
+started the previous image regardless, the healthcheck passed against stale code, and the
+output was hidden behind `tail -1`. I reported "backend=healthy" twice while testing code
+that was not running.
+
+What caught it in the end was noticing the *behaviour had not changed* after an edit that
+should have changed it — the same instinct as session 13's "if a change seems to have no
+effect, check what is actually listening on the port".
+
+Two lessons, and the second is the one that generalises:
+
+- **`tsc --noEmit` is not the build.** The typecheck had been run before that edit and never
+  after it. The Docker image runs `npm run build`, which emits, and only that catches what
+  only that runs.
+- **Never pipe a build to `tail`.** A failed build and a successful one both end with a
+  container starting; the difference is in the lines that got thrown away.
+
+**Verified**
+
+Every period queried against the live API — day, week, month, quarter, half, three quarters,
+year — with the windows and comparison stretches printed and checked by eye against the
+calendar. Twelve new pure checks pin the arithmetic to fixed dates rather than to whatever
+today happens to be, including a Sunday belonging to the week that began the Monday before,
+and three quarters back from Q1 landing in the previous year. 67 backend tests, three
+*emitting* builds, all render checks, all seven MCP tools over stdio.

@@ -41,13 +41,17 @@ export type ExpenseSuggestionOutput = z.infer<typeof expenseSuggestionSchema>;
 /**
  * The body of POST /api/ai/monthly-summary.
  *
- * There is nothing in it. The endpoint summarises the current month, which the
- * server already knows, and taking a month from the caller would be a filter the
- * dashboard has no control for. An empty object rather than no schema at all,
- * because `strictObject` then rejects anything sent by mistake instead of
- * ignoring it — the same rule the analytics query strings follow.
+ * A window, defaulting to the current calendar month. It took nothing at all
+ * until the period dropdown arrived, because the dashboard had no control for
+ * choosing anything else.
+ *
+ * Strict, so anything sent by mistake is rejected rather than ignored — the same
+ * rule the analytics query strings follow.
  */
-export const monthlySummaryRequestSchema = z.strictObject({});
+export const monthlySummaryRequestSchema = z.strictObject({
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+});
 
 /**
  * What a parser is allowed to hand back as a summary.

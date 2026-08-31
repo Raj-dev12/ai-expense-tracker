@@ -93,17 +93,19 @@ export const mockParser: ExpenseParser = {
   },
 
   async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
-    const { month, baseCurrency, totalBase, expenseCount, byCategory, previousMonthTotalBase } =
+    const { month, baseCurrency, totalBase, expenseCount, byCategory, previousTotalBase } =
       request;
 
     if (expenseCount === 0) {
-      return { summary: `No expenses recorded in ${month}.`, producedBy: "mock" };
+      return { summary: `${month}: nothing recorded.`, producedBy: "mock" };
     }
 
     const ranked = [...byCategory].sort((a, b) => b.totalBase - a.totalBase);
     const biggest = ranked[0];
     const sentences: string[] = [
-      `In ${month} you spent ${formatMoney(totalBase, baseCurrency)} across ${expenseCount} expenses.`,
+      `${month} you spent ${formatMoney(totalBase, baseCurrency)} across ${expenseCount} ${
+        expenseCount === 1 ? "expense" : "expenses"
+      }.`,
     ];
 
     if (biggest) {
@@ -113,13 +115,13 @@ export const mockParser: ExpenseParser = {
       );
     }
 
-    if (previousMonthTotalBase !== null && previousMonthTotalBase > 0) {
-      const difference = totalBase - previousMonthTotalBase;
-      const percent = Math.abs(Math.round((difference / previousMonthTotalBase) * 100));
+    if (previousTotalBase !== null && previousTotalBase > 0) {
+      const difference = totalBase - previousTotalBase;
+      const percent = Math.abs(Math.round((difference / previousTotalBase) * 100));
       sentences.push(
         difference >= 0
-          ? `That is ${percent}% more than the month before.`
-          : `That is ${percent}% less than the month before.`,
+          ? `That is ${percent}% more than the stretch before it.`
+          : `That is ${percent}% less than the stretch before it.`,
       );
     }
 

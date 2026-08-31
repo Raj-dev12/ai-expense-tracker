@@ -118,6 +118,16 @@ Asked for after the build plan was written, and built on request rather than sug
       and another at startup for the case a finally cannot cover — proved by sabotaging it
 - [x] Day view: a table of one day with a date picker, reusing `GET /api/expenses` with
       `from` and `to` set to the same date rather than adding an endpoint
+- [x] The summary button was never dead: the parser is deterministic, so a second press
+      returned the identical sentence and nothing changed on screen. It now blanks the
+      text while it works and stamps the time it was written
+- [x] Pie slices and legend rows open a panel listing that period's expenses in the
+      category, dismissed by clicking away or pressing Escape
+- [x] Period dropdown: day, week, month, quarter, half year, three quarters, year — all
+      calendar, all running from the start of their block to today. It governs the cards,
+      the written summary and the pie, so the three cannot describe different stretches
+- [x] `GET /api/analytics/summary` and `POST /api/ai/monthly-summary` now take `from` and
+      `to`; both took nothing at all before, so this was a backend change, not just wiring
 
 ## Finishing
 

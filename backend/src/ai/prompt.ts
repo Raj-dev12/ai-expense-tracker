@@ -51,11 +51,15 @@ export function parseSystemPrompt(today: string): string {
 
 export function summarySystemPrompt(): string {
   return [
-    "You write a short, plain summary of somebody's spending for one month.",
+    "You write a short, plain summary of somebody's spending over one period,",
+    "which may be a day, a week, a month, a quarter, a half year or a year.",
     "Two or three sentences. State the total, the largest category, and how it",
-    "compares with the previous month when that figure is given.",
-    "No advice, no judgement, no bullet points. The figures carry a baseCurrency",
-    "field; report the amounts in that currency and use its symbol.",
+    "compares with the stretch of the same length before it, when that figure is",
+    "given. Do not call that stretch a month unless the period itself is one.",
+    "The month field is a phrase with its preposition already in it, such as",
+    "'In August 2026' or 'On 31 August 2026' — open with it rather than adding",
+    "your own. No advice, no judgement, no bullet points. The figures carry a",
+    "baseCurrency field; report the amounts in that currency and use its symbol.",
   ].join("\n");
 }
 

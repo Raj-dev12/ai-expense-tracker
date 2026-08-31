@@ -3,8 +3,8 @@ import { getParser } from "../ai/index.js";
 import { isConversionEnabled } from "../fx/rates.js";
 import { categoryNames } from "../lib/category-store.js";
 import { UNCATEGORISED } from "../lib/categories.js";
-import { monthLabel, todayIso } from "../lib/dates.js";
-import { categoryTotalsBetween, monthToDate } from "../lib/figures.js";
+import { startOfMonth, todayIso, windowLabel } from "../lib/dates.js";
+import { categoryTotalsBetween, monthToDate, periodFigures } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
@@ -87,15 +87,23 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
    * cards are showing, so the two cannot disagree on screen.
    */
   app.post("/api/ai/monthly-summary", async (request) => {
-    validate(monthlySummaryRequestSchema, request.body ?? {}, "request");
+    const input = validate(monthlySummaryRequestSchema, request.body ?? {}, "request");
 
     const { id: userId, baseCurrency } = await getDemoUser();
-    const figures = await monthToDate(userId);
+
+    const today = todayIso();
+    const figures =
+      input.from || input.to
+        ? await periodFigures(userId, input.from ?? startOfMonth(today), input.to ?? today)
+        : await monthToDate(userId);
+
     const categories = await categoryTotalsBetween(userId, figures.from, figures.to);
 
     const parser = getParser();
     const result = await parser.summarizeMonth({
-      month: monthLabel(figures.from),
+      // The label describes whatever window was asked for, so a quarter does not
+      // come back described as a month.
+      month: windowLabel(figures.from, figures.to),
       baseCurrency,
       // The parser is handed numbers rather than the decimal strings, because it
       // is writing a sentence rather than storing anything. Nothing is written
@@ -106,7 +114,7 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
         category: row.category,
         totalBase: Number(row.totalBase),
       })),
-      previousMonthTotalBase:
+      previousTotalBase:
         figures.previous.count > 0 ? Number(figures.previous.totalBase) : null,
     });
 
@@ -123,6 +131,8 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
       provider: checked.data.producedBy,
       saved: false,
       month: figures.from,
+      from: figures.from,
+      to: figures.to,
       summary: checked.data.summary,
     };
   });

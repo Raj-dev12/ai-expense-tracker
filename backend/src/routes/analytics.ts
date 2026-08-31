@@ -5,7 +5,7 @@ import { expenses } from "../db/schema.js";
 import { addDays, startOfMonth, startOfWeek, todayIso, weekStartsBetween } from "../lib/dates.js";
 // The queries behind these live in one module because the AI monthly summary
 // needs the same numbers. See lib/figures.ts.
-import { categoryTotalsBetween, money, monthToDate } from "../lib/figures.js";
+import { categoryTotalsBetween, money, monthToDate, periodFigures } from "../lib/figures.js";
 import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import { rangeQuerySchema, summaryQuerySchema } from "../schemas/analytics.js";
@@ -14,12 +14,19 @@ import { rangeQuerySchema, summaryQuerySchema } from "../schemas/analytics.js";
 const DEFAULT_MONTHS = 3;
 
 export const analyticsRoutes: FastifyPluginAsync = async (app) => {
-  /** Month to date, and the same stretch of the month before. */
+  /**
+   * A window, and the same number of days immediately before it.
+   *
+   * Defaults to this calendar month so far, which is what it always did.
+   */
   app.get("/api/analytics/summary", async (request) => {
-    validate(summaryQuerySchema, request.query, "parameters");
+    const query = validate(summaryQuerySchema, request.query, "parameters");
     const { id: userId } = await getDemoUser();
 
-    return monthToDate(userId);
+    if (!query.from && !query.to) return monthToDate(userId);
+
+    const today = todayIso();
+    return periodFigures(userId, query.from ?? startOfMonth(today), query.to ?? today);
   });
 
   /** What the pie chart draws: one slice per category that has anything in it. */

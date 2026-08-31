@@ -38,6 +38,59 @@ export function monthLabel(iso: string): string {
   return monthLabelFormatter.format(new Date(Date.UTC(year!, month! - 1, 1)));
 }
 
+/** How many calendar days a window covers, counting both ends. */
+export function daysBetween(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const start = Date.UTC(fy!, fm! - 1, fd!);
+  const end = Date.UTC(ty!, tm! - 1, td!);
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/**
+ * A window as a person would say it.
+ *
+ * "August 2026" when the window starts on the first of a month and ends inside
+ * the same one — the common case, and it reads far better than a range.
+ *
+ * The label carries its own preposition — "In August 2026", "On 31 August 2026",
+ * "In the period 1 July to 31 August 2026" — because the right one depends on
+ * the window. A single day takes "on", a month takes "in", and a caller that had
+ * to guess would get one of the three wrong. The label exists to be dropped into
+ * a sentence, so fitting the sentence is its job.
+ */
+export function windowLabel(from: string, to: string): string {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+
+  // One day: "On 31 August 2026".
+  if (from === to) {
+    const [y, m, d] = from.split("-").map(Number);
+    return `On ${new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(new Date(Date.UTC(y!, m! - 1, d!)))}`;
+  }
+
+  // A whole or partial calendar month: "In August 2026".
+  if (fd === 1 && fy === ty && fm === tm) return `In ${monthLabel(from)}`;
+
+  const day = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const at = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return day.format(new Date(Date.UTC(y!, m! - 1, d!)));
+  };
+
+  return `In the period ${at(from)} to ${at(to)}`;
+}
+
 /** Shift a YYYY-MM-DD date by a number of days. Negative goes backwards. */
 export function addDays(iso: string, days: number): string {
   const [year, month, day] = iso.split("-").map(Number);

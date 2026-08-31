@@ -1,5 +1,5 @@
 import type { MonthlySummary as Summary } from "../api";
-import { formatMonth } from "../format";
+import { PERIODS, PERIOD_LABELS, type Period } from "../periods";
 
 /**
  * Say plainly which parser wrote the sentence.
@@ -25,22 +25,56 @@ function credit(provider: string): string {
  * opening the page.
  */
 export function MonthlySummary({
-  month,
+  period,
+  onPeriodChange,
   summary,
+  writtenAt,
   loading,
   error,
   onRequest,
 }: {
-  month: string;
+  /**
+   * Which window the whole section describes.
+   *
+   * It governs the cards and the pie as well as this sentence, so that the
+   * numbers, the slices and the prose on screen are always about the same
+   * stretch of time. A dropdown that changed only the sentence would be an
+   * invitation to compare two different periods by eye.
+   */
+  period: Period;
+  onPeriodChange: (period: Period) => void;
   summary: Summary | null;
+  /**
+   * When this summary came back.
+   *
+   * Here because the parser is deterministic: asked twice about unchanged
+   * figures it returns the identical sentence, so a re-run leaves the card
+   * looking exactly as it did. Without a clock somewhere on it, pressing the
+   * button again is indistinguishable from the button being broken — which is
+   * precisely how it was reported.
+   */
+  writtenAt: Date | null;
   loading: boolean;
   error: string | null;
   onRequest: () => void;
 }) {
   return (
     <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-3 flex items-baseline justify-between gap-4">
-        <h2 className="text-base font-medium text-slate-900">{formatMonth(month)} in words</h2>
+      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <select
+            value={period}
+            onChange={(event) => onPeriodChange(event.target.value as Period)}
+            className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-slate-900 ring-1 ring-slate-200 outline-none transition focus:ring-2 focus:ring-accent"
+          >
+            {PERIODS.map((name) => (
+              <option key={name} value={name}>
+                {PERIOD_LABELS[name]}
+              </option>
+            ))}
+          </select>
+          <h2 className="text-base font-medium text-slate-900">in words</h2>
+        </div>
         <button
           type="button"
           onClick={onRequest}
@@ -55,14 +89,23 @@ export function MonthlySummary({
 
       {!summary && !error && (
         <p className="text-sm text-slate-400">
-          Ask the parser to describe this month's spending in a sentence or two.
+          Ask the parser to describe this spending in a sentence or two.
         </p>
       )}
 
-      {summary && (
+      {/* Replaces the sentence rather than sitting beside it, so a re-run is a
+          visible change even when the words that come back are identical. */}
+      {loading && summary && (
+        <p className="text-sm text-slate-400">Writing it again...</p>
+      )}
+
+      {summary && !loading && (
         <div className="space-y-2">
           <p className="text-sm leading-relaxed text-slate-700">{summary.summary}</p>
-          <p className="text-xs text-slate-400">{credit(summary.provider)}</p>
+          <p className="text-xs text-slate-400">
+            {credit(summary.provider)}
+            {writtenAt && ` · ${writtenAt.toLocaleTimeString()}`}
+          </p>
         </div>
       )}
     </section>

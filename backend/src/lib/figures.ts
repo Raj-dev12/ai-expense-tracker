@@ -4,14 +4,7 @@ import { CONVERTIBLE_CURRENCIES, convertToBase, isConversionEnabled } from "../f
 import { expenses } from "../db/schema.js";
 import { HttpError } from "./http-error.js";
 import { toMoneyString } from "./money.js";
-import {
-  addDays,
-  dayOfMonth,
-  daysInMonth,
-  startOfMonth,
-  startOfPreviousMonth,
-  todayIso,
-} from "./dates.js";
+import { addDays, daysBetween, startOfMonth, todayIso } from "./dates.js";
 
 /**
  * The month's numbers, worked out in exactly one place.
@@ -123,29 +116,31 @@ export async function categoryTotalsBetween(userId: string, from: string, to: st
   }));
 }
 
-export type MonthToDate = Awaited<ReturnType<typeof monthToDate>>;
+export type PeriodFigures = Awaited<ReturnType<typeof periodFigures>>;
 
 /**
- * Month to date, and the same stretch of the month before.
+ * The totals for a window, and for the equivalent stretch before it.
  *
- * The comparison deliberately uses the same *number of days* rather than the
- * whole previous month. Comparing the first three days of August against the
- * whole of July would show spending collapsing by 90% every month, which is not
- * information, it is an artefact of the calendar.
+ * The comparison rule is one sentence: **the same number of days, immediately
+ * before the window started.** For a month-to-date window that is exactly the
+ * behaviour this had when it only ever did months — 1 to 31 August compares
+ * against 1 to 31 July — so nothing about the cards changed when periods
+ * arrived. It generalises without the server having to learn what a "quarter"
+ * is, which keeps the seven period names in the one place that has to know
+ * them: the dropdown that offers them.
+ *
+ * Comparing a partial period against a whole one is the trap this avoids. Three
+ * days into a quarter, "this quarter versus last quarter" would show spending
+ * collapsing by 97% — an artefact of the calendar rather than information.
  */
-export async function monthToDate(userId: string) {
-  const today = todayIso();
-  const from = startOfMonth(today);
-  const daysElapsed = dayOfMonth(today);
+export async function periodFigures(userId: string, from: string, to: string) {
+  const daysElapsed = daysBetween(from, to);
 
-  const previousStart = startOfPreviousMonth(today);
-  // A shorter previous month is clamped, so 31 March compares against all of
-  // February rather than running off the end of it.
-  const previousDays = Math.min(daysElapsed, daysInMonth(previousStart));
-  const previousEnd = addDays(previousStart, previousDays - 1);
+  const previousEnd = addDays(from, -1);
+  const previousStart = addDays(previousEnd, -(daysElapsed - 1));
 
   const [current, previous] = await Promise.all([
-    totalBetween(userId, from, today),
+    totalBetween(userId, from, to),
     totalBetween(userId, previousStart, previousEnd),
   ]);
 
@@ -154,7 +149,7 @@ export async function monthToDate(userId: string) {
 
   return {
     from,
-    to: today,
+    to,
     daysElapsed,
     totalBase: current.total,
     count: current.count,
@@ -173,4 +168,10 @@ export async function monthToDate(userId: string) {
         ? Math.round(((currentTotal - previousTotal) / previousTotal) * 1000) / 10
         : null,
   };
+}
+
+/** The default window: this calendar month so far. */
+export async function monthToDate(userId: string) {
+  const today = todayIso();
+  return periodFigures(userId, startOfMonth(today), today);
 }

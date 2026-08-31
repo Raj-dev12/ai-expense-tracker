@@ -57,7 +57,7 @@ export type MonthlySummaryRequest = {
   totalBase: number;
   expenseCount: number;
   byCategory: ReadonlyArray<{ category: string; totalBase: number }>;
-  previousMonthTotalBase: number | null;
+  previousTotalBase: number | null;
 };
 
 /**

@@ -28,6 +28,7 @@ import {
   type Trend,
 } from "./api";
 import { formatMoney, todayIso } from "./format";
+import { windowFor, type Period } from "./periods";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
@@ -92,7 +93,20 @@ export default function App() {
    * inside that one card rather than at the top of a page that is otherwise
    * working perfectly well.
    */
+  /**
+   * The window the summary cards, the written summary and the pie all describe.
+   *
+   * One piece of state for three things on purpose: numbers, prose and slices
+   * that could disagree about which stretch of time they cover would be worse
+   * than having no period control at all.
+   *
+   * The trend chart deliberately does not follow it. That chart is about change
+   * over a long run, and squeezing it into "today" would leave a single point.
+   */
+  const [period, setPeriod] = useState<Period>("month");
+
   const [monthly, setMonthly] = useState<MonthlySummaryResponse | null>(null);
+  const [monthlyAt, setMonthlyAt] = useState<Date | null>(null);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [monthlyError, setMonthlyError] = useState<string | null>(null);
 
@@ -145,6 +159,17 @@ export default function App() {
    * not refetch the charts, and saving an expense should not reset the day you
    * were looking at.
    */
+  /**
+   * The category whose expenses are open under the pie, and what they are.
+   *
+   * Fetched here like everything else that talks to the API, and keyed on the
+   * same window the pie is drawing so the panel can never describe a different
+   * period from the chart above it.
+   */
+  const [pieCategory, setPieCategory] = useState<string | null>(null);
+  const [pieExpenses, setPieExpenses] = useState<Expense[]>([]);
+  const [pieLoading, setPieLoading] = useState(false);
+
   const [day, setDay] = useState(todayIso);
   const [dayExpenses, setDayExpenses] = useState<Expense[]>([]);
   const [dayLoading, setDayLoading] = useState(true);
@@ -173,13 +198,14 @@ export default function App() {
    */
   const refresh = useCallback(async () => {
     setWrites((count) => count + 1);
+    const window = windowFor(period);
 
     try {
       const [list, nextSummary, nextCategories, nextTrend, settings, allCategories] =
         await Promise.all([
               listExpenses({ limit: EXPENSE_LIMIT }),
-          getSummary(),
-          getCategories(),
+          getSummary(window),
+          getCategories(window),
           getTrend(),
           getSettings(),
           getCategoryList(),
@@ -199,11 +225,38 @@ export default function App() {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [period]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!pieCategory || !categories) return;
+
+    let cancelled = false;
+    setPieLoading(true);
+
+    listExpenses({
+      from: categories.from,
+      to: categories.to,
+      category: pieCategory,
+      limit: EXPENSE_LIMIT,
+    })
+      .then((result) => {
+        if (!cancelled) setPieExpenses(result.expenses);
+      })
+      .catch(() => {
+        if (!cancelled) setPieExpenses([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPieLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pieCategory, categories, writes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -413,6 +466,20 @@ export default function App() {
     }
   }
 
+  // Stable identity, so the pie's outside-click effect is not torn down and
+  // rebuilt on every render of the page.
+  const dismissPieCategory = useCallback(() => setPieCategory(null), []);
+
+  function handlePeriodChange(next: Period) {
+    setPeriod(next);
+    // The sentence on screen describes the period that was selected when it was
+    // written. Leaving it there under a new heading would be the card claiming
+    // to summarise something it never looked at.
+    setMonthly(null);
+    setMonthlyAt(null);
+    setPieCategory(null);
+  }
+
   async function handleSummarise() {
     if (monthlyLoading) return;
 
@@ -422,7 +489,8 @@ export default function App() {
     try {
       // Reads figures, returns prose, saves nothing — api.ts asserts the
       // `saved: false` the endpoint promises, exactly as it does for a parse.
-      setMonthly(await getMonthlySummary());
+      setMonthly(await getMonthlySummary(windowFor(period)));
+      setMonthlyAt(new Date());
     } catch (caught) {
       setMonthlyError(
         caught instanceof ApiError ? caught.message : "Could not write a summary",
@@ -528,8 +596,10 @@ export default function App() {
 
             {summary && (
               <MonthlySummary
-                month={summary.from}
+                period={period}
+                onPeriodChange={handlePeriodChange}
                 summary={monthly}
+                writtenAt={monthlyAt}
                 loading={monthlyLoading}
                 error={monthlyError}
                 onRequest={handleSummarise}
@@ -542,6 +612,11 @@ export default function App() {
                   categories={categories.categories}
                   from={categories.from}
                   currency={currency}
+                  selected={pieCategory}
+                  selectedExpenses={pieExpenses}
+                  selectedLoading={pieLoading}
+                  onSelect={setPieCategory}
+                  onDismiss={dismissPieCategory}
                 />
               )}
               {trend && <TrendChart points={trend.points} currency={currency} />}

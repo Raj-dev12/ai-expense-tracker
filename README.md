@@ -273,7 +273,7 @@ GET    /api/expenses            from, to, category, minAmount, search, limit, of
 GET    /api/expenses/:id
 PATCH  /api/expenses/:id      change any field; omitted fields are left alone
 DELETE /api/expenses/:id
-GET    /api/analytics/summary   month to date, vs the same days last month
+GET    /api/analytics/summary   from, to; defaults to this month, vs the days before it
 GET    /api/analytics/categories
 GET    /api/analytics/trend     weekly buckets
 GET    /api/categories          the categories, with how many expenses each holds
@@ -283,7 +283,7 @@ DELETE /api/categories/:name    remove one; ?expenses=reassign or ?expenses=dele
 GET    /api/settings            the currency, whether it was chosen, and the ISO list
 PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
-POST   /api/ai/monthly-summary  this month in a sentence or two, saves nothing
+POST   /api/ai/monthly-summary  from, to; a period in a sentence or two, saves nothing
 ```
 
 Unknown query parameters are rejected with a 400 rather than ignored, because
