@@ -443,6 +443,19 @@ fetching everything and adding it up in JavaScript matters as soon as there is r
 the database reads the rows it already has on disk, while the alternative sends every expense
 across the network to be counted.
 
+**LIKE and ILIKE, and their wildcards**
+`LIKE` asks whether text matches a pattern; `ILIKE` is the same thing ignoring capitals, which
+is what free-text search wants. Inside the pattern two characters are not literal: `%` means
+"any run of characters" and `_` means "exactly one of any character". So a search for `H_M`
+finds `H&M`, but it also finds `HAM` and `HIM`. When somebody searches for a name that
+contains one of those two characters, the pattern has to say "I mean this one literally", which
+is done by putting a backslash in front of it.
+
+This is a different problem from SQL injection. The value is still sent to the database as a
+parameter and can never become an instruction — that part was always safe. It is the *meaning
+within the pattern* that needed fixing, so that a search for `50%` looks for a percent sign
+rather than for everything.
+
 **Bucketing**
 Putting rows into fixed time slots and summing each slot — here, one slot per week. The slots
 have to exist even when they are empty, which is why weeks with no spending are sent as zero
@@ -682,6 +695,30 @@ It's the difference between an app you use and an app an AI can operate on your 
 You'll be able to type "how much did I spend on restaurants this month?" into an AI
 assistant and watch it decide to call your tool, run your query, and answer from your real data.
 
+**Historical exchange rate**
+What a currency was worth on a particular day, rather than what it is worth now. An expense
+from three weeks ago converted at today's rate is quietly wrong; converted at the rate from the
+day it happened, it is right. Frankfurter serves European Central Bank rates back to 1999 for
+free, so being correct here costs nothing. The bank publishes on business days only, so a
+Saturday returns Friday's rate — and the reply says which day it actually used, which is the
+day worth recording.
+
+**Cache**
+Keeping an answer so the same question does not have to be asked twice. Rates are cached by
+day and currency: a historical rate never changes, and adding several expenses from the same
+week would otherwise mean several identical requests. The cache lives in memory, so restarting
+the server simply asks again.
+
+**stdio (standard input and output)**
+The two text streams every program is born with. An MCP client starts the server as a child
+process and talks to it through these, which is why an MCP server over stdio must run on the
+same machine as the assistant — and why ours has no Dockerfile and appears nowhere in
+docker-compose. It runs locally and calls the deployed API over HTTPS instead.
+
+One consequence worth remembering while editing it: **stdout belongs to the protocol.** A
+stray `console.log` would be read as a malformed message and break the connection. Anything
+worth saying goes to stderr.
+
 ---
 
 ## 9. Terms: hosting and deployment
@@ -873,6 +910,9 @@ want when someone asks you about the project in six months.
 | Empty weeks on the line | Drawn as zero points | The same reason the endpoint sends them: a missing week is not a gap, it is a straight line drawn across one, which reads as steady spending during a week when there was none. |
 | The month-on-month figure | Shown with an arrow and a sentence, in ordinary ink — never green or red | Spending more than last month is not automatically bad; it might be a holiday, or rent landing in a different week. Colouring it red would be the interface drawing a conclusion the data does not support. It says what happened and leaves the judgement to the person reading. |
 | Legend layout | A container query, not a viewport breakpoint, and nothing truncates | The card is narrower on a *wide* screen, because the two charts move into a two-column grid there — so a viewport breakpoint answers the wrong question, and answers it confidently. Names are a fixed vocabulary of nine short words: if one does not fit, the layout is wrong and gets more room, rather than being clipped into looking deliberate. |
+| Rate on the day, cached | Converted using the rate from the day the money was spent, cached per day and currency, falling back to the fixed table | An expense from three weeks ago converted at today's rate is quietly wrong, and a service with free history makes being right free too. The conversion reports whether the figure came from the service or the fallback, so nothing has to pretend an approximation is a real rate. |
+| The seed script stays offline | Seeded rows convert with the fixed table, never the live service | Seeded data has to be reproducible. A seed that fetched live rates would write different euro amounts into the database every day, undoing the point of seeding from a fixed random seed. |
+| Text search lives in the backend | `GET /api/expenses?search=` rather than filtering inside the MCP server | Searching then means the same thing whoever asks — the browser, an assistant, or curl. Filtering in the MCP server would have been a second definition of what "matches" means, in a place nothing else can reach. |
 
 ---
 
@@ -1528,3 +1568,121 @@ what they *cannot* see is part of reading the result.
 Everything visual. The arithmetic says the legend now stacks below the pie whenever the card is
 under 576px and sits beside it above that, which covers both the two-column grid and the
 full-width case — but arithmetic is not a screenshot.
+
+### Session 12 — hour 4, live rates and the MCP server
+
+**Exchange rates**
+
+Conversion now asks Frankfurter for the rate on the day the money was spent, caches it per day
+and currency for 24 hours, and falls back to the fixed table when the service cannot be
+reached. See [[historical-exchange-rate]].
+
+Proved rather than assumed: 100 USD spent on 2026-07-14 stores as €87.68, where the fixed table
+would have said €92.00; a Saturday (2026-07-11) correctly comes back with Friday's rate and
+reports 2026-07-10 as the day it used; and with the service pointed at a dead address, both an
+unreachable host and a 404 fall back to the table without failing the request.
+
+The seed script deliberately does not use any of this — see the decisions table.
+
+**The MCP server**
+
+Six tools over stdio, in `mcp/`, calling the backend's HTTP API and never the database. No
+Dockerfile, nothing in docker-compose: see [[stdio-standard-input-and-output]] for why that is
+a property of the transport rather than a shortcut.
+
+The tool descriptions are written as instructions to a reader who has to choose between them —
+when to use `search_expenses` rather than `list_expenses`, that `add_expense` writes and should
+not be used to answer a question, that ids come from a listing and must never be invented. The
+destructive tool is annotated as destructive and the four reading tools as read-only, so a
+client can treat them differently without reading the prose.
+
+**Two bugs found by testing it properly**
+
+- Every request set `Content-Type: application/json`, including DELETE, which has no body.
+  Fastify rejects that outright, so deleting anything failed with a complaint about content
+  types rather than doing the job.
+- The check that was supposed to prove "deleting something that does not exist is refused"
+  had been passing for the wrong reason — first because of the content-type bug, and then
+  because the obvious all-ones UUID is not a valid UUID at all, so it was turned away by the
+  format check and never reached the question being asked. It now uses a well-formed id that
+  belongs to nothing, and gets the 404 it was always meant to test.
+
+That is the second time this project has had a check pass for the wrong reason. Both times the
+tell was the same: the assertion was satisfied by something other than the behaviour it named.
+
+**Verified**
+
+`npm run check` in `mcp/` drives the server the way a client does — launched as a child
+process, spoken to over the real protocol, against the real backend. Twenty-two checks: all six
+tools advertised and annotated, every read tool answering, a euro and a foreign expense saved
+and found, invalid categories, negative amounts and future dates all refused by the backend
+rather than by the tool, and both test rows deleted again afterwards.
+
+**Next**
+
+Connecting it to an actual AI client, which is yours to do. Then hour 5: Dockerfiles for the
+frontend and backend, compose, Caddy, and the server.
+
+---
+
+### Session 13 — connected to an AI client, and a search that found nothing
+
+**Connected end to end**
+
+The MCP server is now talking to a real AI assistant rather than to a test harness. Asked "how
+much did I spend this month", the assistant called `get_expense_summary` on its own and
+answered from the real database: €1836.95 across 31 expenses, 7% less than the same stretch of
+July. `get_spending_by_category`, `list_expenses` and `search_expenses` were all exercised the
+same way. That was the last unticked item in hour 4.
+
+**A bug in the new search filter**
+
+The search added in hour 4 escapes the two LIKE wildcards so that a search for a percent sign
+means a percent sign. The escaping was written like this:
+
+```ts
+query.search.replace(/[\%_]/g, (character) => `\${character}`)
+```
+
+Inside a template literal, a backslash before a dollar sign is an *escape*: it says "this is
+an ordinary dollar character, not the start of a substitution". So `${character}` was never
+substituted at all. Every `%` and every `_` in a search was replaced with the eleven literal
+characters `${character}`, and the search then went looking for that — and found nothing, ever.
+
+The fix is two backslashes, which produce one real backslash and then let the substitution
+happen. It also now escapes the backslash itself, since a backslash is the character that does
+the escaping:
+
+```ts
+query.search.replace(/[\\%_]/g, (character) => `\\${character}`)
+```
+
+**The trap that hid it**
+
+Testing the fix appeared to prove it had not worked. Two things were wrong at once.
+
+The first was the test. A search for `_` returned nothing both before and after the fix — with
+the bug because it looked for the wrong string, and with the fix because no shop has an
+underscore in its name. Same answer, opposite reasons. A test whose result cannot tell the two
+cases apart proves nothing. The test that does work needs two rows, `ZZ_TEST` and `ZZxTEST`,
+and asks for `ZZ_TEST`: escaped correctly it returns one row, unescaped it returns both, and
+with the old bug it returns neither. Three distinguishable answers.
+
+The second was that two backend servers were running: one started with `tsx watch`, one
+without. The one without `watch` had the port, so it served the old code no matter how many
+times the file was saved, and the watching one had quietly died of a port clash. **If a change
+seems to have no effect, check what is actually listening on the port before doubting the
+change.** `Get-NetTCPConnection -LocalPort 3000` names the process holding it.
+
+That is the third time a check in this project has passed for the wrong reason, and this time
+the wrong reason was two deep.
+
+**Verified**
+
+Against the reloaded server: `ZZ_TEST` returns only the literal row and not `ZZxTEST`, a search
+for `%` returns nothing rather than everything, and ordinary words still work. Both test rows
+were deleted afterwards and the table is back to its seeded 98.
+
+**Next**
+
+Hour 5: Dockerfiles for the frontend and backend, compose, Caddy, and the server.

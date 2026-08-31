@@ -38,6 +38,11 @@ const envSchema = z.object({
 
   // How long to wait on a provider before giving up and using the mock.
   AI_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+
+  // Exchange rates. Frankfurter serves European Central Bank rates with no key
+  // and no account, which is what keeps the "runs with nothing configured"
+  // promise true for currency conversion as well as for the AI.
+  FX_API_URL: z.string().min(1).default("https://api.frankfurter.app"),
 });
 
 const result = envSchema.safeParse(process.env);

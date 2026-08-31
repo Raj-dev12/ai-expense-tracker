@@ -46,22 +46,23 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Hour 4 — MCP and exchange rates
 
-- [ ] MCP server scaffolded
-- [ ] `add_expense`
-- [ ] `list_expenses`
-- [ ] `search_expenses`
-- [ ] `get_spending_by_category`
-- [ ] `get_expense_summary`
-- [ ] `delete_expense`
-- [ ] Tool descriptions written clearly
-- [ ] Connected to an AI client and verified end to end
-- [ ] Exchange rates fetched and cached for 24 hours
-- [ ] Static fallback rates when the API is unreachable
-- [ ] Non-euro amounts converted before storage
+- [x] MCP server scaffolded
+- [x] `add_expense`
+- [x] `list_expenses`
+- [x] `search_expenses`
+- [x] `get_spending_by_category`
+- [x] `get_expense_summary`
+- [x] `delete_expense`
+- [x] Tool descriptions written clearly
+- [x] Connected to an AI client and verified end to end
+- [x] Exchange rates fetched and cached for 24 hours
+- [x] Static fallback rates when the API is unreachable
+- [x] Non-euro amounts converted before storage
 
 ## Hour 5 — deployment
 
-- [ ] Dockerfiles for frontend, backend, MCP
+- [ ] Dockerfiles for frontend and backend (the MCP server runs locally over stdio,
+      so it has none and is not in compose)
 - [ ] `docker compose up` works locally
 - [ ] Caddyfile serves frontend and proxies `/api`
 - [ ] Hetzner server created, Finland region

@@ -88,6 +88,10 @@ export const listExpensesQuerySchema = z.strictObject({
   to: isoDateSchema.optional(),
   category: categorySchema.optional(),
   minAmount: z.coerce.number().nonnegative().optional(),
+  // Free text, matched against the merchant and the description. Kept here
+  // rather than in the MCP server so that searching means the same thing
+  // whoever asks — the browser, an AI assistant, or curl.
+  search: z.string().trim().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

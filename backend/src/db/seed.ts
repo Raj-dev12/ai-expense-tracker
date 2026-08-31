@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { env } from "../env.js";
-import { convertToEur } from "../fx/rates.js";
+import { convertWithStaticRate } from "../fx/rates.js";
 import { addDays, todayIso } from "../lib/dates.js";
 import type { CategoryName } from "../lib/categories.js";
 import { CATEGORY_NAMES } from "../lib/categories.js";
@@ -235,7 +235,10 @@ async function main() {
       userId: user.id,
       amount: toMoneyString(item.amount),
       currency: item.currency,
-      amountEur: toMoneyString(convertToEur(item.amount, item.currency)),
+      // The fixed table on purpose: a seed that fetched live rates would put
+      // different euro amounts in the database every day, which would undo the
+      // point of seeding from a fixed random seed.
+      amountEur: toMoneyString(convertWithStaticRate(item.amount, item.currency).amountEur),
       merchant: item.merchant,
       category: item.category,
       description: item.note,

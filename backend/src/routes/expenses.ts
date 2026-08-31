@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lte } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses, type ExpenseRow } from "../db/schema.js";
@@ -63,7 +63,8 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       throw new HttpError(429, "This demo has reached its expense limit");
     }
 
-    const amountEur = convertToEur(input.amount, input.currency);
+    // Converted at the rate from the day it was spent, not today.
+    const conversion = await convertToEur(input.amount, input.currency, input.expenseDate);
 
     const [created] = await db
       .insert(expenses)
@@ -71,7 +72,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
         userId,
         amount: toMoneyString(input.amount),
         currency: input.currency,
-        amountEur: toMoneyString(amountEur),
+        amountEur: toMoneyString(conversion.amountEur),
         merchant: input.merchant ?? null,
         category: input.category,
         description: input.description ?? null,
@@ -93,6 +94,16 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     if (query.from) filters.push(gte(expenses.expenseDate, query.from));
     if (query.to) filters.push(lte(expenses.expenseDate, query.to));
     if (query.category) filters.push(eq(expenses.category, query.category));
+    if (query.search) {
+      // % and _ are wildcards in a LIKE pattern, so a search for "50%" would
+      // otherwise match far more than the person asked for. A backslash is
+      // escaped too, because a backslash is what does the escaping. The value
+      // itself is still sent as a parameter, never glued into the SQL.
+      const term = query.search.replace(/[\\%_]/g, (character) => `\\${character}`);
+      filters.push(
+        or(ilike(expenses.merchant, `%${term}%`), ilike(expenses.description, `%${term}%`))!,
+      );
+    }
     if (query.minAmount !== undefined) {
       // The comparison happens in the database against the decimal column, so
       // the filter is exact rather than approximate.
