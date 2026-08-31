@@ -61,10 +61,14 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Hour 5 — deployment
 
-- [ ] Dockerfiles for frontend and backend (the MCP server runs locally over stdio,
+- [x] Dockerfiles for frontend and backend (the MCP server runs locally over stdio,
       so it has none and is not in compose)
-- [ ] `docker compose up` works locally
-- [ ] Caddyfile serves frontend and proxies `/api`
+- [x] `docker compose up` works locally
+- [x] Caddyfile serves frontend and proxies `/api`
+- [x] Backend applies migrations itself on every start, so a new machine needs no
+      manual setup step
+- [x] Verified from an empty database in a throwaway copy of the stack: up, migrate,
+      seed, 97 expenses, analytics answering. The real database was never touched.
 - [ ] Hetzner server created, Finland region
 - [ ] Docker installed on the server
 - [ ] Repository deployed

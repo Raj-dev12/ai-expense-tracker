@@ -1,10 +1,21 @@
-# Hour 1 runs only the database. The backend, frontend, MCP server and Caddy
-# get added here in hour 5, once each of them works on its own.
+# One file describing the whole system, so it starts with one command.
+#
+# Three containers. The MCP server is deliberately not one of them: it is
+# launched by an AI client on your own machine and talks over stdio, so there is
+# nothing for it to listen on and nowhere useful to run it. It reaches this
+# system the same way a browser does, over the public API.
+#
+#   docker compose up -d --build      build and start everything
+#   docker compose logs -f            watch what they are all saying
+#   docker compose down               stop, keeping the database
+#   docker compose down -v            stop and delete the database as well
+#
+# Values written as ${NAME:-default} come from the .env file in this folder, and
+# fall back to the default when it is missing or the line is blank.
 
 services:
   db:
     image: postgres:17-alpine
-    container_name: expense-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-expense}
@@ -12,7 +23,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-expenses}
       TZ: ${TZ:-Europe/Helsinki}
     ports:
-      - "5432:5432"
+      # Bound to 127.0.0.1, so the database is reachable from this machine —
+      # which is what lets "npm run dev" outside Docker still connect — and from
+      # nowhere else. Written as plain "5432:5432" it would be open to the whole
+      # internet the moment this file reached a server.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -21,5 +36,65 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      # Built here rather than taken from .env on purpose. The DATABASE_URL in
+      # .env says "localhost", which is correct for running the backend directly
+      # on this machine and wrong inside a container, where localhost means the
+      # container itself. Containers reach each other by service name, so in here
+      # the database lives at "db".
+      DATABASE_URL: postgres://${POSTGRES_USER:-expense}:${POSTGRES_PASSWORD:-expense_local_dev}@db:5432/${POSTGRES_DB:-expenses}
+      PORT: 3000
+      TZ: ${TZ:-Europe/Helsinki}
+
+      # Defaults to the mock, so the system runs with no keys present at all.
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FX_API_URL: ${FX_API_URL:-https://api.frankfurter.app}
+
+      # The seed script deletes every expense before writing, so it stays off
+      # unless .env says otherwise. It is never run automatically — it is run by
+      # hand with: docker compose exec backend node dist/db/seed.js
+      ALLOW_SEED: ${ALLOW_SEED:-false}
+    depends_on:
+      db:
+        # Waits for the database's healthcheck to pass, not merely for its
+        # container to exist. Postgres takes a few seconds to accept connections
+        # after starting, and the backend runs migrations immediately.
+        condition: service_healthy
+    # No "ports" section. Nothing outside Docker talks to the backend directly —
+    # everything arrives through Caddy at /api. One front door.
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      # Blank in .env means local: plain HTTP on localhost, no certificate.
+      # On the server this becomes the sslip.io hostname and Caddy arranges
+      # HTTPS by itself.
+      DOMAIN: ${DOMAIN:-http://localhost}
+    ports:
+      # 80 and 443 are the addresses browsers use by default. They are
+      # overridable only because port 80 is often already taken on a Windows
+      # machine; on the server they must stay as they are, because Let's Encrypt
+      # checks the certificate request on port 80.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      # Mounted rather than copied into the image, so changing a route is a
+      # restart instead of a rebuild. :ro means the container cannot write to it.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here. Without a volume Caddy would ask Let's Encrypt
+      # for a new one on every restart and quickly hit their rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:

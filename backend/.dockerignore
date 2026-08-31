@@ -1,0 +1,12 @@
+# Everything listed here is kept out of the build. Copying node_modules from a
+# Windows machine into a Linux image is the classic way to get a native package
+# that was compiled for the wrong operating system, and dist/ is rebuilt inside
+# the image anyway.
+node_modules
+dist
+*.log
+
+# Belt and braces: the root .env is outside this folder and so cannot be copied,
+# but if one is ever created here it must not end up inside an image.
+.env
+.env.*

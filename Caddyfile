@@ -1,0 +1,43 @@
+# Caddy is the front door. Every request from a browser arrives here first, and
+# this file decides which of the two things behind it should answer.
+#
+# {$DOMAIN} is filled in from an environment variable, set by docker-compose.
+#   locally      http://localhost   plain HTTP, no certificate, no warnings
+#   on a server  expenses.<ip-with-dashes>.sslip.io
+#
+# The difference matters: given a bare hostname Caddy fetches a real HTTPS
+# certificate from Let's Encrypt automatically. Given one starting http:// it
+# knows not to try, which is what stops a local run from failing over a
+# certificate that could never be issued for "localhost" anyway.
+{$DOMAIN} {
+	# Compress replies. Costs nothing and makes the JavaScript bundle land faster.
+	encode zstd gzip
+
+	# Anything under /api belongs to the backend. "backend" is a hostname Docker
+	# creates for us — containers on the same compose network find each other by
+	# service name, so no IP address is ever written down.
+	#
+	# The backend keeps the /api prefix: its routes are declared as /api/health
+	# and so on, so the path is passed through untouched.
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# Everything else is the frontend: the files vite built, copied into /srv
+	# when the frontend image was assembled.
+	handle {
+		root * /srv
+
+		# The app is a single page with no router, but a browser reloaded on any
+		# address still has to be answered. try_files serves a real file when the
+		# path names one — /assets/index-abc123.js — and otherwise falls back to
+		# index.html so React boots instead of Caddy returning a 404.
+		try_files {path} /index.html
+
+		file_server
+	}
+
+	# Access logs to the container's output, where "docker compose logs" finds
+	# them. No file to rotate, no disk to fill.
+	log
+}

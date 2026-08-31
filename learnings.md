@@ -807,6 +807,71 @@ A trivial endpoint that answers "is this thing actually working". Ours runs a on
 against the database, because a server that replies while its database is unreachable is
 still broken. Docker uses the same idea to decide when the database has finished starting.
 
+**Image versus container**
+The image is the sealed box you build; the container is a running copy of it. One image can
+start any number of containers, and deleting a container throws away everything inside it
+that was not in a volume. That is the point: containers are meant to be disposable.
+
+**Dockerfile**
+The recipe for building one image — which base to start from, what to copy in, what command
+to run. Ours are short on purpose: two of them for three applications, because the MCP
+server needs none.
+
+**Multi-stage build**
+A Dockerfile with more than one FROM line. The first stage installs the compiler and every
+development tool and turns TypeScript into JavaScript; the last stage copies out only the
+result. The compiler never ends up in the finished image, which keeps it small and gives an
+attacker less to work with.
+
+**Layer cache**
+Docker remembers the result of each step and reuses it when nothing that step depends on has
+changed. It is why both Dockerfiles copy `package.json` and the lock file on their own,
+before the source code: editing a route then reuses the cached install instead of
+downloading every dependency again.
+
+**`npm ci` versus `npm install`**
+`npm ci` installs exactly the versions written in `package-lock.json` and fails if the lock
+file disagrees with `package.json`. `npm install` is free to resolve newer ones. A build
+should give the same answer today and in six months, so images are built with `ci`.
+
+**Build context and `.dockerignore`**
+The build context is the folder handed to Docker when an image is built. `.dockerignore`
+lists what to leave out of it. Ours excludes `node_modules`, because copying packages
+installed on Windows into a Linux image is a well-known way to end up with one compiled for
+the wrong operating system.
+
+**Service name as a hostname**
+Compose puts every container on one private network and makes each reachable by its service
+name. Inside that network `backend` resolves to the backend container, so no IP address is
+ever written down and nothing breaks when Docker hands out different ones tomorrow.
+
+**`localhost` inside a container**
+`localhost` always means "this machine", and inside a container that machine is the
+container. This is the most common Docker confusion there is: the `DATABASE_URL` in `.env`
+says `localhost`, which is right when the backend runs directly on your laptop and wrong
+inside a container, where the database is at `db` instead. Compose sets the correct one.
+
+**Publishing a port**
+`ports: "80:80"` opens a door from the outside world into a container. Anything not
+published is reachable only by the other containers. The backend deliberately publishes
+nothing: everything reaches it through Caddy, so there is one front door rather than three.
+
+**Binding to 127.0.0.1**
+`"127.0.0.1:5432:5432"` publishes a port to this machine only. Written as plain
+`"5432:5432"` it would be open to the entire internet the moment the file reached a server —
+Docker writes its own firewall rules and will happily overrule the one you configured.
+
+**SPA fallback (`try_files`)**
+A single-page app is one HTML file that JavaScript then redraws. A browser reloaded on a
+sub-path still asks the server for that path, and there is no such file. `try_files {path}
+/index.html` serves a real file when the path names one and otherwise hands back the single
+page, so the app boots instead of Caddy returning a 404.
+
+**Running as a non-root user**
+Containers run as the all-powerful root user unless told otherwise. `USER node` switches to
+an ordinary account, so a flaw in a dependency has far less to work with. One line, and
+nothing about the app has to change.
+
 ---
 
 ## 10. Terms: tools we type into
@@ -913,6 +978,14 @@ want when someone asks you about the project in six months.
 | Rate on the day, cached | Converted using the rate from the day the money was spent, cached per day and currency, falling back to the fixed table | An expense from three weeks ago converted at today's rate is quietly wrong, and a service with free history makes being right free too. The conversion reports whether the figure came from the service or the fallback, so nothing has to pretend an approximation is a real rate. |
 | The seed script stays offline | Seeded rows convert with the fixed table, never the live service | Seeded data has to be reproducible. A seed that fetched live rates would write different euro amounts into the database every day, undoing the point of seeding from a fixed random seed. |
 | Text search lives in the backend | `GET /api/expenses?search=` rather than filtering inside the MCP server | Searching then means the same thing whoever asks — the browser, an assistant, or curl. Filtering in the MCP server would have been a second definition of what "matches" means, in a place nothing else can reach. |
+| The frontend image is Caddy | One container holds the built files and the web server, and that same container is the front door: it serves the page and proxies `/api` to the backend | The alternative was a small static-file container with a second Caddy in front of it — two web servers, two configs, one extra hop, to separate two things that are only ever deployed together. The build plan already described one Caddyfile that serves the frontend and proxies the API, and this is that file, doing exactly that. |
+| Migrations run at container start | The backend's start command is `migrate && index.js` | Migrations are written to be safe to re-run, so applying them to an up-to-date database does nothing. Making it automatic means a fresh server needs no manual setup step — which is the step most likely to be forgotten at the moment it matters, over SSH, with an audience. |
+| `DATABASE_URL` is built in compose, not read from `.env` | Assembled from the `POSTGRES_*` values with the host `db` | The URL in `.env` says `localhost`, which is correct for running the backend directly and wrong inside a container, where `localhost` is the container itself. One file cannot hold both answers, so the container's answer is written where the container is described. |
+| The Caddyfile is mounted, not copied into the image | `./Caddyfile:/etc/caddy/Caddyfile:ro` | Changing a route becomes a restart rather than a rebuild of the whole frontend. Read-only, so nothing in the container can rewrite its own routing. |
+| Local runs use plain HTTP | `DOMAIN` defaults to `http://localhost`; on the server it is the bare sslip.io hostname | Given a bare hostname Caddy fetches a real certificate automatically; given one starting `http://` it knows not to try. Nobody can issue a certificate for `localhost`, so the local run would otherwise fail on something that could never have worked. One variable switches between the two. |
+| The backend publishes no port | Only the web container is reachable from outside Docker | Everything arrives through Caddy at `/api`, so there is one front door instead of three, and the API cannot be reached in a way that skips it. It also means the MCP server's `BACKEND_URL` becomes `http://localhost` under compose rather than `http://localhost:3000`. |
+| Postgres is published to `127.0.0.1` only | `"127.0.0.1:5432:5432"` | Keeps `npm run dev` outside Docker able to connect while never exposing the database publicly. Docker writes its own firewall rules, so a plain `"5432:5432"` on a server is open to the internet regardless of what the firewall was told. |
+| No `container_name` in compose | Containers are named by compose: `expense-tracker-backend-1` | A fixed name means only one copy of the stack can ever run, which is exactly what broke the first attempt to test a cold start alongside the real one. `docker compose logs backend` and `docker compose exec backend` work by service name either way, so the fixed names bought nothing. |
 
 ---
 
@@ -1686,3 +1759,103 @@ were deleted afterwards and the table is back to its seeded 98.
 **Next**
 
 Hour 5: Dockerfiles for the frontend and backend, compose, Caddy, and the server.
+
+### Session 14 — hour 5 part one, the whole thing in Docker
+
+**What now exists**
+
+Two Dockerfiles, a Caddyfile, and a compose file that starts three containers:
+
+```
+browser ──▶ web (Caddy)  ──/api/*──▶ backend (Fastify) ──▶ db (Postgres)
+                         └─────────▶ the built React files in /srv
+```
+
+The MCP server is not among them, and that is deliberate rather than unfinished. It is
+launched by an AI client on your own machine and talks over stdio, so there is nothing for
+it to listen on and nowhere useful to put it. It reaches the system over the public API the
+same way a browser does. The build plan's repository layout drew an `mcp/Dockerfile`; that
+was written before the transport was decided, and it is now wrong on purpose.
+
+**Both Dockerfiles are multi-stage**
+
+The first stage installs everything, compilers included, and builds. The second copies out
+only the result. The backend's finished image has no TypeScript in it and the frontend's has
+no Node at all — once vite has run, the frontend is just files, and files need a web server
+rather than a runtime.
+
+**Three containers, one front door**
+
+Only the web container publishes a port. The backend publishes none: everything reaches it
+through Caddy at `/api`, so the API cannot be reached in a way that skips the front door.
+Containers find each other by service name on a private network, which is why the Caddyfile
+says `reverse_proxy backend:3000` and no IP address appears anywhere.
+
+The database is published, but to `127.0.0.1` only. That keeps `npm run dev` outside Docker
+able to connect while leaving it unreachable from anywhere else. Plain `"5432:5432"` would
+have been open to the whole internet the moment this file reached a server — Docker writes
+its own firewall rules and overrules the one you configured.
+
+**The localhost trap**
+
+`localhost` means "this machine", and inside a container that machine is the container. The
+`DATABASE_URL` in `.env` points at `localhost`, which is right for running the backend
+directly and wrong inside a container, where the database is at `db`. Compose therefore
+builds the container's URL itself out of the `POSTGRES_*` values rather than reading it from
+`.env`. One file cannot hold both answers.
+
+The same trap moved the MCP server's `BACKEND_URL`: under compose the backend has no
+published port, so it becomes `http://localhost` — port 80, through Caddy — instead of
+`http://localhost:3000`. Noted in `.env.example` with all three answers side by side.
+
+**Migrations run themselves**
+
+The backend's start command is `migrate && index.js`. Migrations are safe to re-run, so on
+an up-to-date database this does nothing, and on a brand new one it builds the schema. A
+fresh server then needs no manual setup step — the step most likely to be forgotten over
+SSH with an audience watching.
+
+**One certificate decision, made by a default**
+
+`DOMAIN` is blank locally, and compose turns that into `http://localhost`. Given a bare
+hostname Caddy fetches a real HTTPS certificate by itself; given one starting `http://` it
+knows not to try. Nobody can issue a certificate for `localhost`, so without that default
+the local run would have failed on something that could never have worked in the first
+place. On the server `DOMAIN` becomes the sslip.io hostname and HTTPS happens on its own.
+
+**A fixed container name blocked the test that mattered**
+
+The compose file inherited `container_name: expense-db` from hour 1. Testing a cold start
+means running a second, throwaway copy of the whole stack, and a fixed name makes that
+impossible — Docker refused with a name conflict. The names are gone: `docker compose logs
+backend` and `docker compose exec backend` address containers by *service* name and never
+needed them.
+
+**Proved from empty, without touching the real data**
+
+The interesting question is not whether it runs here, where the database already exists. It
+is whether it runs on a machine that has nothing. So the stack was started a second time
+under a different project name, with its own empty volume, on ports 8080 and 8443, reading
+`.env.example` as though the repository had just been cloned:
+
+- migrations applied to an empty database on their own
+- the app answered with `total: 0` and a summary of `0.00` rather than an error
+- `docker compose exec backend node dist/db/seed.js` wrote the demo user and 97 expenses
+- analytics answered correctly afterwards
+
+Then it was deleted, volume and all, and the real stack restarted with its 100 expenses
+intact. **Testing a fresh install against your own working database proves nothing** — the
+database is the part that was already there.
+
+**Checked through Caddy, not around it**
+
+`/api/health` reachable, the page served, a hashed asset served, an unknown path falling back
+to `index.html` so a reload does not 404, and `/api/nope` returning the backend's own JSON
+error rather than a Caddy page. `AI_PROVIDER` was left at `mock` throughout and no key was
+set anywhere, which is the rule the whole project is built around.
+
+**Next**
+
+Rent the Hetzner box, install Docker, copy the repository across, set `DOMAIN` to the
+sslip.io hostname, and start it. The build should be identical, which is the entire reason
+for having done this first.
