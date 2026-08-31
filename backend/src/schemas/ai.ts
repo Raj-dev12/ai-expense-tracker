@@ -37,3 +37,27 @@ export const parseResultSchema = z.strictObject({
 });
 
 export type ExpenseSuggestionOutput = z.infer<typeof expenseSuggestionSchema>;
+
+/**
+ * The body of POST /api/ai/monthly-summary.
+ *
+ * There is nothing in it. The endpoint summarises the current month, which the
+ * server already knows, and taking a month from the caller would be a filter the
+ * dashboard has no control for. An empty object rather than no schema at all,
+ * because `strictObject` then rejects anything sent by mistake instead of
+ * ignoring it — the same rule the analytics query strings follow.
+ */
+export const monthlySummaryRequestSchema = z.strictObject({});
+
+/**
+ * What a parser is allowed to hand back as a summary.
+ *
+ * Prose from a model is still an input from outside, so it is checked like any
+ * other. The length cap matters more than it looks: the prompt asks for two or
+ * three sentences, and a model that ignores that and returns three pages should
+ * be a clean 502 rather than something the page tries to lay out.
+ */
+export const monthlySummaryResultSchema = z.strictObject({
+  summary: z.string().trim().min(1).max(2000),
+  producedBy: z.enum(AI_PROVIDER_NAMES),
+});

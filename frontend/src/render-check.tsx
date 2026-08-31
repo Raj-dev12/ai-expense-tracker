@@ -22,6 +22,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
+import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
@@ -192,5 +193,81 @@ check("list: euro row does not repeat itself", !list.includes("12.50 EUR"));
 check("list: a row added elsewhere says so", list.includes("added by mcp"));
 check("list: a row added here does not", !list.includes("added by web"));
 check("list: says how many of how many", list.includes("showing 2 of 97"));
+
+// 8. The monthly summary.
+//
+// The checks that matter here are about honesty rather than layout: the card
+// must name the parser that actually wrote the sentence, and it must not claim
+// a real provider wrote something the mock produced.
+const idle = renderToStaticMarkup(
+  <MonthlySummary
+    month="2026-08-01"
+    summary={null}
+    loading={false}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+check("summary: names the month", idle.includes("August in words"));
+check("summary: button invites a first run", idle.includes("Summarise this month"));
+// apostrophes are HTML-escaped in the markup, so the assertion stops short of one
+check("summary: says what the button will do", idle.includes("describe this month"));
+
+const written = renderToStaticMarkup(
+  <MonthlySummary
+    month="2026-08-01"
+    summary={{
+      provider: "mock",
+      saved: false,
+      month: "2026-08-01",
+      summary: "In August 2026 you spent €1854.45 across 31 expenses.",
+    }}
+    loading={false}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+check("summary: the sentence is shown", written.includes("across 31 expenses"));
+check("summary: credits the mock", written.includes("Written by the mock parser"));
+check("summary: explains what the mock is", written.includes("no API key needed"));
+check("summary: offers to rewrite once written", written.includes("Write it again"));
+
+// The important one. A summary the mock produced must never be credited to a
+// provider that was merely configured — on a fallback those differ, and this is
+// the field that tells the truth about it.
+const byClaude = renderToStaticMarkup(
+  <MonthlySummary
+    month="2026-08-01"
+    summary={{ provider: "claude", saved: false, month: "2026-08-01", summary: "A sentence." }}
+    loading={false}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+check("summary: credits the real provider when it answered", byClaude.includes("Written by the claude parser"));
+check("summary: does not also claim the mock", !byClaude.includes("mock"));
+
+const failed = renderToStaticMarkup(
+  <MonthlySummary
+    month="2026-08-01"
+    summary={null}
+    loading={false}
+    error="Could not write a summary"
+    onRequest={() => {}}
+  />,
+);
+check("summary: an error is shown in the card", failed.includes("Could not write a summary"));
+
+const writing = renderToStaticMarkup(
+  <MonthlySummary
+    month="2026-08-01"
+    summary={null}
+    loading={true}
+    error={null}
+    onRequest={() => {}}
+  />,
+);
+check("summary: button says it is working", writing.includes("Writing..."));
+check("summary: button disabled while working", writing.includes("disabled"));
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");

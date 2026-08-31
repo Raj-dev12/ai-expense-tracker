@@ -9,6 +9,7 @@ import {
 import type {
   ExpenseParser,
   MonthlySummaryRequest,
+  MonthlySummaryResult,
   ParseRequest,
   ParseResult,
 } from "./types.js";
@@ -90,10 +91,12 @@ export const mockParser: ExpenseParser = {
     };
   },
 
-  async summarizeMonth(request: MonthlySummaryRequest): Promise<string> {
+  async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
     const { month, totalEur, expenseCount, byCategory, previousMonthTotalEur } = request;
 
-    if (expenseCount === 0) return `No expenses recorded in ${month}.`;
+    if (expenseCount === 0) {
+      return { summary: `No expenses recorded in ${month}.`, producedBy: "mock" };
+    }
 
     const ranked = [...byCategory].sort((a, b) => b.totalEur - a.totalEur);
     const biggest = ranked[0];
@@ -118,6 +121,6 @@ export const mockParser: ExpenseParser = {
       );
     }
 
-    return sentences.join(" ");
+    return { summary: sentences.join(" "), producedBy: "mock" };
   },
 };

@@ -3,18 +3,21 @@ import {
   ApiError,
   createExpense,
   getCategories,
+  getMonthlySummary,
   getSummary,
   getTrend,
   listExpenses,
   parseExpense,
   type CategoryBreakdown,
   type Expense,
+  type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
   type ParseResponse,
   type Summary,
   type Trend,
 } from "./api";
 import { CategoryPie } from "./components/CategoryPie";
+import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
@@ -47,6 +50,19 @@ export default function App() {
   const [categories, setCategories] = useState<CategoryBreakdown | null>(null);
   const [trend, setTrend] = useState<Trend | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  /**
+   * The written summary is kept separate from the dashboard's own state.
+   *
+   * It is not fetched with the rest: it is the only thing on the page that can
+   * cost money and take a second, so it waits behind a button. Its error is
+   * separate too, because a provider having a bad day should put a message
+   * inside that one card rather than at the top of a page that is otherwise
+   * working perfectly well.
+   */
+  const [monthly, setMonthly] = useState<MonthlySummaryResponse | null>(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [monthlyError, setMonthlyError] = useState<string | null>(null);
 
   /**
    * Everything the dashboard shows, refetched together.
@@ -110,6 +126,11 @@ export default function App() {
       setJustSaved(saved);
       setReview(null);
       setSentence("");
+      // The summary described the totals as they were a moment ago. Leaving it
+      // on screen next to freshly changed cards would have the page stating two
+      // different numbers for the same month, so it is cleared rather than
+      // silently going stale. Pressing the button again rewrites it.
+      setMonthly(null);
       await refresh();
     } catch (caught) {
       setError(
@@ -125,6 +146,25 @@ export default function App() {
   function handleDiscard() {
     setReview(null);
     setError(null);
+  }
+
+  async function handleSummarise() {
+    if (monthlyLoading) return;
+
+    setMonthlyLoading(true);
+    setMonthlyError(null);
+
+    try {
+      // Reads figures, returns prose, saves nothing — api.ts asserts the
+      // `saved: false` the endpoint promises, exactly as it does for a parse.
+      setMonthly(await getMonthlySummary());
+    } catch (caught) {
+      setMonthlyError(
+        caught instanceof ApiError ? caught.message : "Could not write a summary",
+      );
+    } finally {
+      setMonthlyLoading(false);
+    }
   }
 
   return (
@@ -186,6 +226,16 @@ export default function App() {
         ) : (
           <>
             {summary && <SummaryCards summary={summary} />}
+
+            {summary && (
+              <MonthlySummary
+                month={summary.from}
+                summary={monthly}
+                loading={monthlyLoading}
+                error={monthlyError}
+                onRequest={handleSummarise}
+              />
+            )}
 
             <div className="grid gap-4 lg:grid-cols-2">
               {categories && (

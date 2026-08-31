@@ -10,6 +10,7 @@ import {
 import type {
   ExpenseParser,
   MonthlySummaryRequest,
+  MonthlySummaryResult,
   ParseRequest,
   ParseResult,
 } from "./types.js";
@@ -60,7 +61,7 @@ export function createClaudeParser(apiKey: string): ExpenseParser {
       return toValidatedResult(parsed, sentence, "claude");
     },
 
-    async summarizeMonth(request: MonthlySummaryRequest): Promise<string> {
+    async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
       const response = await client.messages.create({
         model: env.ANTHROPIC_MODEL,
         max_tokens: 16000,
@@ -83,7 +84,7 @@ export function createClaudeParser(apiKey: string): ExpenseParser {
 
       if (!text) throw new Error("Claude returned an empty summary");
 
-      return text;
+      return { summary: text, producedBy: "claude" };
     },
   };
 }

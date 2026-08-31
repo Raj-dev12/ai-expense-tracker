@@ -20,6 +20,24 @@ export function todayIso(): string {
   return isoDateFormatter.format(new Date());
 }
 
+/**
+ * "2026-08-01" → "August 2026".
+ *
+ * For prose only. Everything stored or compared uses the ISO form; this exists
+ * because a summary that begins "In 2026-08-01 you spent" is a sentence no
+ * person would write.
+ */
+const monthLabelFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  month: "long",
+  year: "numeric",
+});
+
+export function monthLabel(iso: string): string {
+  const [year, month] = iso.split("-").map(Number);
+  return monthLabelFormatter.format(new Date(Date.UTC(year!, month! - 1, 1)));
+}
+
 /** Shift a YYYY-MM-DD date by a number of days. Negative goes backwards. */
 export function addDays(iso: string, days: number): string {
   const [year, month, day] = iso.split("-").map(Number);

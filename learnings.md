@@ -986,6 +986,12 @@ want when someone asks you about the project in six months.
 | The backend publishes no port | Only the web container is reachable from outside Docker | Everything arrives through Caddy at `/api`, so there is one front door instead of three, and the API cannot be reached in a way that skips it. It also means the MCP server's `BACKEND_URL` becomes `http://localhost` under compose rather than `http://localhost:3000`. |
 | Postgres is published to `127.0.0.1` only | `"127.0.0.1:5432:5432"` | Keeps `npm run dev` outside Docker able to connect while never exposing the database publicly. Docker writes its own firewall rules, so a plain `"5432:5432"` on a server is open to the internet regardless of what the firewall was told. |
 | No `container_name` in compose | Containers are named by compose: `expense-tracker-backend-1` | A fixed name means only one copy of the stack can ever run, which is exactly what broke the first attempt to test a cold start alongside the real one. `docker compose logs backend` and `docker compose exec backend` work by service name either way, so the fixed names bought nothing. |
+| `summarizeMonth` returns an object, not a string | `{ summary, producedBy }` | A bare string cannot say who wrote it, and on a fallback the configured provider and the answering one differ. The page prints that name, so returning it from the adapter is the only way the credit under the sentence can be true. It matches what `parseExpense` already did. |
+| The month's figures live in one module | `lib/figures.ts`, used by the analytics routes and the summary endpoint | The cards and the sentence describe the same month. Computing the totals twice would be two definitions of "what you spent", and the day they drifted the page would contradict itself on screen — a card saying 6% less above a sentence saying 4% more. |
+| The summary sits behind a button | Not fetched with the rest of the dashboard | It is the only thing on the page that can cost money and take a second. Loading it with everything else would make opening the page slower and, with a real provider configured, bill for a sentence nobody asked to read. |
+| Saving an expense clears the written summary | Rather than leaving it on screen | The sentence describes totals as they were a moment ago. Next to freshly updated cards it would state a different number for the same month. Clearing is honest; silently going stale is not. |
+| The parser is handed a readable month | "August 2026", not "2026-08-01" | The request object exists only to become a sentence, and the mock interpolates the field straight into one. It produced "In 2026-08-01 you spent" until this changed. The ISO date is still what the HTTP response carries. |
+| The summary body is an empty strict object | `z.strictObject({})` | The endpoint summarises the current month, which the server already knows, and there is no control on the page for choosing another. Strict rather than absent so that a `{"month": "2026-07"}` sent hopefully gets a 400 instead of being ignored — the same rule the analytics query strings follow. |
 
 ---
 
@@ -1859,3 +1865,76 @@ set anywhere, which is the rule the whole project is built around.
 Rent the Hetzner box, install Docker, copy the repository across, set `DOMAIN` to the
 sslip.io hostname, and start it. The build should be identical, which is the entire reason
 for having done this first.
+
+### Session 15 — the monthly summary, and a number that could have disagreed with itself
+
+**What was added**
+
+`POST /api/ai/monthly-summary` and a card on the dashboard with a button on it. The endpoint
+reads the month's figures, asks the parser for a sentence or two, validates what comes back,
+and returns it. Like the parse endpoint it saves nothing, and says so in the response.
+
+The plumbing had been there since hour 2 — `summarizeMonth` was in the `ExpenseParser`
+interface and all three adapters implemented it — but nothing exposed it. The README called
+it "plumbing with no tap on the end", which is why it was worth finishing rather than
+deleting.
+
+**A bare string could not tell the truth**
+
+`summarizeMonth` returned a `string`. That is fine until you ask the question this project
+always asks: *who actually answered?* When a real provider fails, the fallback wrapper quietly
+uses the mock instead, and a card reading "written by Claude" over a sentence the mock
+produced would be a lie told on exactly the occasion when the truth matters.
+
+So the return type became an object, `{ summary, producedBy }`, matching what `parseExpense`
+had done since hour 2. The fallback needed no logic for it: the mock's own result already says
+`producedBy: "mock"`, so the truth propagates by itself.
+
+**The bug that was avoided rather than fixed**
+
+The dashboard cards say "€1854.45, 6% less than last month". The AI sentence says the same
+thing in words. Those are the same numbers, and the obvious way to write the new endpoint is
+to query for them again.
+
+That would have been two definitions of "what you spent this month" in two files, and the day
+they drifted the page would contradict itself in two places at once — a card and a sentence
+disagreeing about the same month, directly above one another. So the queries moved into
+`lib/figures.ts` and both callers now use them. `routes/analytics.ts` got shorter by about
+sixty lines in the process, which is the usual sign that the extraction was the right shape.
+
+**The mock wrote a date where a month belonged**
+
+First run through the browser produced: *"In 2026-08-01 you spent €1854.45..."*. The request
+object carried `month` as an ISO date, and the mock interpolates that field straight into a
+sentence. Nobody had ever seen it, because nothing had ever called it.
+
+The fix was to decide what that field is *for*. It exists only to become prose — the mock
+writes it into a sentence, and a real model receives it as JSON to write a sentence from — so
+it now carries "August 2026". The ISO date is still what the HTTP response returns, where a
+machine-readable month is the useful one. **A field used only by humans should hold what a
+human would write.**
+
+**Two checks that assert honesty rather than layout**
+
+The render checks gained a section for the new card. Most of it is ordinary — the sentence
+appears, the button changes label — but two are about the rule rather than the rendering:
+a summary from the mock must credit the mock, and one from Claude must credit Claude and not
+mention the mock at all. Those are the assertions that would fail if the fallback ever started
+lying.
+
+Both failed on the first run, and both were the *checks* being wrong rather than the
+component: `formatMonth` returns "August" without a year, and React escapes the apostrophe in
+"this month's" to `&#x27;` in the markup, so a substring containing one never matches. Worth
+remembering — asserting on rendered HTML means asserting on escaped HTML.
+
+**Verified**
+
+67 backend tests still pass, both projects typecheck, all render checks pass, and through
+Caddy the endpoint returns a sentence built from the same €1854.45 and 6% the cards show. A
+body with an unexpected field gets a 400; no body at all works. `AI_PROVIDER` stayed at `mock`
+with no key set anywhere throughout.
+
+**Not done**
+
+The MCP server has no tool for this. Nothing asked for one, and the six tools in the plan are
+about querying and adding expenses rather than generating prose.

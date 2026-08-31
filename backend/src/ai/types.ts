@@ -38,11 +38,31 @@ export type ParseRequest = {
 };
 
 export type MonthlySummaryRequest = {
+  /**
+   * The month as a person would say it: "August 2026", not "2026-08-01".
+   *
+   * This object exists only to be turned into a sentence, and every consumer of
+   * it — the mock's string building, and the JSON handed to a real model — wants
+   * the readable form. The ISO date is what the HTTP response carries.
+   */
   month: string;
   totalEur: number;
   expenseCount: number;
   byCategory: ReadonlyArray<{ category: string; totalEur: number }>;
   previousMonthTotalEur: number | null;
+};
+
+/**
+ * A written summary, and who wrote it.
+ *
+ * This used to be a bare string. It carries `producedBy` for the same reason
+ * `ParseResult` does: a provider that fails is answered by the mock instead, and
+ * a page that said "written by Claude" over a sentence the mock produced would
+ * be lying on exactly the occasions when the truth is worth knowing.
+ */
+export type MonthlySummaryResult = {
+  summary: string;
+  producedBy: AiProviderName;
 };
 
 /**
@@ -57,5 +77,5 @@ export type MonthlySummaryRequest = {
 export interface ExpenseParser {
   readonly name: AiProviderName;
   parseExpense(request: ParseRequest): Promise<ParseResult>;
-  summarizeMonth(request: MonthlySummaryRequest): Promise<string>;
+  summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult>;
 }

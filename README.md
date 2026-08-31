@@ -21,9 +21,10 @@ wrong, and only when you press confirm does the browser call the ordinary, valid
 that writes a row. Below the box, a dashboard shows the month's total against the same
 stretch of last month, a pie of where the money went, a fourteen-week trend line, and the
 most recent expenses. Amounts entered in another currency are converted to euros using the
-European Central Bank's rate *for the day they were spent*, and both figures are kept. An MCP
-server lets an outside AI assistant query the same data and add expenses through the same API
-a browser uses.
+European Central Bank's rate *for the day they were spent*, and both figures are kept. A
+button asks the AI to describe the month in a sentence or two, and the card underneath it says
+which parser actually wrote that sentence. An MCP server lets an outside AI assistant query
+the same data and add expenses through the same API a browser uses.
 
 ## Architecture
 
@@ -187,6 +188,7 @@ GET    /api/analytics/summary   month to date, vs the same days last month
 GET    /api/analytics/categories
 GET    /api/analytics/trend     weekly buckets
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
+POST   /api/ai/monthly-summary  this month in a sentence or two, saves nothing
 ```
 
 Unknown query parameters are rejected with a 400 rather than ignored, because
@@ -201,9 +203,6 @@ one that admits the gaps.
 - **It is not deployed yet.** Everything above runs under `docker compose` on a laptop, and
   that has been tested from an empty database. The VPS, the sslip.io address and the HTTPS
   padlock are the remaining half of the deployment work and have not been done.
-- **The AI monthly summary is not finished.** The parser interface has a `summarizeMonth`
-  method and all three adapters implement it, but no HTTP route exposes it and no button
-  calls it. It is plumbing with no tap on the end.
 - **There is no delete button in the interface.** `DELETE /api/expenses/:id` exists and the
   MCP server's `delete_expense` uses it, but the page has no control for it.
 - **There is no login.** One demo user, created by the seed script, looked up on every

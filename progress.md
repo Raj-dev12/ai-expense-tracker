@@ -78,7 +78,9 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Finishing
 
-- [ ] `AI_PROVIDER` extra feature: monthly summary endpoint and button
+- [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.
+      Works on the mock with no key, and the card names the parser that actually wrote
+      the sentence rather than the one configured.
 - [x] README written: screenshot, architecture diagram, stack, two-command local setup,
       the AI safety pattern, the no-key promise, and why the MCP server is not in compose.
       Also lists plainly what is not built yet.

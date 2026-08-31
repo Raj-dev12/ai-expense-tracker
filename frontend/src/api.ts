@@ -207,3 +207,27 @@ export function getCategories(): Promise<CategoryBreakdown> {
 export function getTrend(): Promise<Trend> {
   return request("/api/analytics/trend", trendSchema);
 }
+
+// --- the monthly summary -----------------------------------------------------
+
+const monthlySummarySchema = z.object({
+  // Which parser actually wrote the sentence, which on a fallback is the mock
+  // rather than whichever provider is configured. The page prints this, so it
+  // has to be the truthful one.
+  provider: z.string(),
+  // The same promise the parse endpoint makes, asserted the same way: asking
+  // for a summary must not change anything.
+  saved: z.literal(false),
+  month: z.string(),
+  summary: z.string(),
+});
+
+export type MonthlySummary = z.infer<typeof monthlySummarySchema>;
+
+/** Ask for a written summary of this month. Saves nothing. */
+export function getMonthlySummary(): Promise<MonthlySummary> {
+  return request("/api/ai/monthly-summary", monthlySummarySchema, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}

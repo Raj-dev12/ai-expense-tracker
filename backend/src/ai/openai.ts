@@ -10,6 +10,7 @@ import {
 import type {
   ExpenseParser,
   MonthlySummaryRequest,
+  MonthlySummaryResult,
   ParseRequest,
   ParseResult,
 } from "./types.js";
@@ -47,7 +48,7 @@ export function createOpenAiParser(apiKey: string): ExpenseParser {
       return toValidatedResult(parsed, sentence, "openai");
     },
 
-    async summarizeMonth(request: MonthlySummaryRequest): Promise<string> {
+    async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
       const response = await client.responses.create({
         model: env.OPENAI_MODEL,
         input: [
@@ -59,7 +60,7 @@ export function createOpenAiParser(apiKey: string): ExpenseParser {
       const text = response.output_text?.trim();
       if (!text) throw new Error("OpenAI returned an empty summary");
 
-      return text;
+      return { summary: text, producedBy: "openai" };
     },
   };
 }

@@ -2,6 +2,7 @@ import { mockParser } from "./mock.js";
 import type {
   ExpenseParser,
   MonthlySummaryRequest,
+  MonthlySummaryResult,
   ParseRequest,
   ParseResult,
 } from "./types.js";
@@ -49,11 +50,14 @@ export function withMockFallback(parser: ExpenseParser): ExpenseParser {
       }
     },
 
-    async summarizeMonth(request: MonthlySummaryRequest): Promise<string> {
+    async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
       try {
         return await parser.summarizeMonth(request);
       } catch (error) {
         report("summary", error);
+        // The mock's own result says `producedBy: "mock"`, so the page ends up
+        // telling the truth about who wrote the sentence without this wrapper
+        // having to say anything.
         return mockParser.summarizeMonth(request);
       }
     },
