@@ -7,7 +7,10 @@ import {
   removeFirst,
 } from "./extract.js";
 import { formatMoney } from "../lib/money.js";
+import { readQuestion } from "./ask-rules.js";
 import type {
+  AskRequest,
+  AskResult,
   ExpenseParser,
   MonthlySummaryRequest,
   MonthlySummaryResult,
@@ -126,5 +129,9 @@ export const mockParser: ExpenseParser = {
     }
 
     return { summary: sentences.join(" "), producedBy: "mock" };
+  },
+
+  async askQuestion(request: AskRequest): Promise<AskResult> {
+    return { question: readQuestion(request), producedBy: "mock" };
   },
 };

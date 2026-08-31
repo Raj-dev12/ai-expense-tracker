@@ -1,13 +1,17 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { env } from "../env.js";
+import { structuredQuestionSchema } from "../schemas/ai.js";
 import {
   aiExpenseSchema,
+  askSystemPrompt,
   parseSystemPrompt,
   summarySystemPrompt,
   toValidatedResult,
 } from "./prompt.js";
 import type {
+  AskRequest,
+  AskResult,
   ExpenseParser,
   MonthlySummaryRequest,
   MonthlySummaryResult,
@@ -46,6 +50,29 @@ export function createOpenAiParser(apiKey: string): ExpenseParser {
       if (!parsed) throw new Error("OpenAI returned no parsed output");
 
       return toValidatedResult(parsed, sentence, "openai");
+    },
+
+    /**
+     * Turn a question into a structured query. It answers nothing: the shape it
+     * returns is run against the database, which is what keeps a model away from
+     * arithmetic about somebody's money.
+     */
+    async askQuestion(request: AskRequest): Promise<AskResult> {
+      const response = await client.responses.parse({
+        model: env.OPENAI_MODEL,
+        input: [
+          { role: "system", content: askSystemPrompt(request) },
+          { role: "user", content: request.question },
+        ],
+        text: { format: zodTextFormat(structuredQuestionSchema, "question") },
+      });
+
+      const parsed = response.output_parsed;
+      if (!parsed) throw new Error("OpenAI returned no parsed output");
+
+      // Validated again in the route, like every other parser result. The SDK
+      // promises the shape; our own schema is what decides it is acceptable.
+      return { question: parsed as AskResult["question"], producedBy: "openai" };
     },
 
     async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {

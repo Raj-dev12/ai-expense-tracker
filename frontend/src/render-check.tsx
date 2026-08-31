@@ -29,7 +29,7 @@ import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
 import { DayView } from "./components/DayView";
 import { buildPatch } from "./components/ExpenseEditor";
-import { MonthlySummary } from "./components/MonthlySummary";
+import { AnalysisCard } from "./components/AnalysisCard";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
@@ -227,7 +227,7 @@ check("list: says how many of how many", list.includes("showing 2 of 97"));
 // must name the parser that actually wrote the sentence, and it must not claim
 // a real provider wrote something the mock produced.
 const idle = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={null}
@@ -235,6 +235,10 @@ const idle = renderToStaticMarkup(
     loading={false}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 // The heading is a period dropdown now, not a fixed month.
@@ -245,7 +249,7 @@ check("summary: button invites a first run", idle.includes("Summarise this month
 check("summary: says what the button will do", idle.includes("describe this spending"));
 
 const written = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={{
@@ -260,6 +264,10 @@ const written = renderToStaticMarkup(
     loading={false}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 check("summary: the sentence is shown", written.includes("across 31 expenses"));
@@ -271,7 +279,7 @@ check("summary: offers to rewrite once written", written.includes("Write it agai
 // provider that was merely configured — on a fallback those differ, and this is
 // the field that tells the truth about it.
 const byClaude = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={{ provider: "claude", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -279,13 +287,17 @@ const byClaude = renderToStaticMarkup(
     loading={false}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 check("summary: credits the real provider when it answered", byClaude.includes("Written by the claude parser"));
 check("summary: does not also claim the mock", !byClaude.includes("mock"));
 
 const failed = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={null}
@@ -293,12 +305,16 @@ const failed = renderToStaticMarkup(
     loading={false}
     error="Could not write a summary"
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 check("summary: an error is shown in the card", failed.includes("Could not write a summary"));
 
 const writing = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={null}
@@ -306,6 +322,10 @@ const writing = renderToStaticMarkup(
     loading={true}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 check("summary: button says it is working", writing.includes("Writing..."));
@@ -552,7 +572,7 @@ check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.include
 // parser is deterministic, so a second press returned the same sentence and
 // nothing on the card changed. These assert the two things that now differ.
 const rerunning = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -560,13 +580,17 @@ const rerunning = renderToStaticMarkup(
     loading={true}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 check("summary: a re-run replaces the sentence while it works", rerunning.includes("Writing it again"));
 check("summary: the old sentence is not left sitting there", !rerunning.includes("A sentence."));
 
 const reWritten = renderToStaticMarkup(
-  <MonthlySummary
+  <AnalysisCard
     period="month"
     onPeriodChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -574,6 +598,10 @@ const reWritten = renderToStaticMarkup(
     loading={false}
     error={null}
     onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
   />,
 );
 // The clock is the only thing that changes when the words do not.
@@ -638,6 +666,79 @@ check("period: Sunday belongs to the week that began on Monday", windowFor("week
 check("period: three quarters back from Q1 crosses the year", windowFor("threeQuarters", "2026-02-10").from === "2025-07-01", windowFor("threeQuarters", "2026-02-10").from);
 check("period: the first half starts in January", windowFor("half", "2026-02-10").from === "2026-01-01");
 check("period: Q2 starts in April", windowFor("quarter", "2026-05-05").from === "2026-04-01");
+
+// 22. The question box.
+const cardProps = {
+  period: "month" as const,
+  onPeriodChange: () => {},
+  summary: null,
+  writtenAt: null,
+  loading: false,
+  error: null,
+  onRequest: () => {},
+  asking: false,
+  askError: null,
+  onAsk: () => {},
+};
+
+const askIdle = renderToStaticMarkup(<AnalysisCard {...cardProps} answer={null} />);
+check("ask: the box is there", askIdle.includes("Ask about your spending"));
+// The placeholder has to read as a question, because the add box at the top of
+// the page also takes a sentence and that is this feature's one real hazard.
+check("ask: the placeholder asks rather than states", askIdle.includes("highest expense in Travel"));
+// One accent-coloured control in the card. A second button beside the box would
+// be two things competing for the same glance.
+check("ask: the box has no button of its own", (askIdle.match(/<button/g) ?? []).length === 1);
+
+const answered = renderToStaticMarkup(
+  <AnalysisCard
+    {...cardProps}
+    answer={{
+      provider: "mock",
+      saved: false,
+      answerable: true,
+      looksLikeExpense: false,
+      answer: "Your highest expense in Travel was €196.83 at Booking.com on 2 July 2026.",
+      reading: "highest 1 expense · Travel · 1 to 31 August 2026",
+    }}
+  />,
+);
+check("ask: the answer is shown", answered.includes("Booking.com"));
+// The same honesty as the confirm step: a misread question should look like a
+// misread question rather than a surprising number.
+check("ask: how the question was read is shown", answered.includes("read as:"));
+
+const refused = renderToStaticMarkup(
+  <AnalysisCard
+    {...cardProps}
+    answer={{
+      provider: "mock",
+      saved: false,
+      answerable: false,
+      looksLikeExpense: false,
+      answer: "I can only look up what was spent — not why.",
+      reading: null,
+    }}
+  />,
+);
+check("ask: a refusal is shown plainly", refused.includes("I can only look up what was spent"));
+check("ask: a refusal carries no reading", !refused.includes("read as:"));
+
+const signposted = renderToStaticMarkup(
+  <AnalysisCard
+    {...cardProps}
+    answer={{
+      provider: "mock",
+      saved: false,
+      answerable: false,
+      looksLikeExpense: true,
+      answer: "That looks like an expense rather than a question.",
+      reading: null,
+    }}
+  />,
+);
+check("ask: an expense gets a signpost", signposted.includes("That looks like an expense"));
+check("ask: the signpost points at the add box", signposted.includes("box at the top of the page"));
 
 // 15. Requests only announce JSON when they are actually sending some.
 //

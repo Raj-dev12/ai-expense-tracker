@@ -65,3 +65,73 @@ export const monthlySummaryResultSchema = z.strictObject({
   summary: z.string().trim().min(1).max(2000),
   producedBy: z.enum(AI_PROVIDER_NAMES),
 });
+
+// ---------------------------------------------------------------------------
+// Asking questions
+// ---------------------------------------------------------------------------
+
+/** The body of POST /api/ai/ask. */
+export const askRequestSchema = z.strictObject({
+  question: z.string().trim().min(1, "Ask something").max(300),
+  // The window the card is showing. A question that names its own range
+  // overrides it, which the parser expresses by filling in the filters.
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+});
+
+const questionFiltersSchema = z.strictObject({
+  category: z.string().trim().min(1).max(40).nullish(),
+  merchant: z.string().trim().min(1).max(120).nullish(),
+  from: isoDateSchema.nullish(),
+  to: isoDateSchema.nullish(),
+});
+
+const measureSchema = z.enum(["total", "count", "average"]);
+const orderSchema = z.enum(["highest", "lowest"]);
+const bucketSchema = z.enum(["day", "week", "month", "category", "merchant"]);
+// Capped because the answer is one sentence. Twenty expenses read out in a row
+// is not an answer, it is a list pretending to be one.
+const limitSchema = z.number().int().min(1).max(10);
+
+/**
+ * What a parser is allowed to hand back for a question.
+ *
+ * A discriminated union, so an invented `kind` is refused by the shape rather
+ * than falling through a switch into whichever branch happens to be last. This
+ * is the check that makes the grammar a real boundary instead of a description
+ * of one — everything downstream can assume it is holding one of exactly five
+ * things.
+ */
+export const structuredQuestionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("unsupported"),
+    reason: z.string().trim().min(1).max(300),
+  }),
+  z.strictObject({ kind: z.literal("looksLikeExpense") }),
+  z.strictObject({
+    kind: z.literal("aggregate"),
+    measure: measureSchema,
+    filters: questionFiltersSchema.default({}),
+  }),
+  z.strictObject({
+    kind: z.literal("topExpenses"),
+    order: orderSchema,
+    limit: limitSchema.default(1),
+    filters: questionFiltersSchema.default({}),
+  }),
+  z.strictObject({
+    kind: z.literal("topBuckets"),
+    bucket: bucketSchema,
+    measure: measureSchema,
+    order: orderSchema,
+    limit: limitSchema.default(1),
+    filters: questionFiltersSchema.default({}),
+  }),
+]);
+
+export const askResultSchema = z.strictObject({
+  question: structuredQuestionSchema,
+  producedBy: z.enum(AI_PROVIDER_NAMES),
+});
+
+export type StructuredQuestionOutput = z.infer<typeof structuredQuestionSchema>;

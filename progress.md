@@ -128,6 +128,14 @@ Asked for after the build plan was written, and built on request rather than sug
       the written summary and the pie, so the three cannot describe different stretches
 - [x] `GET /api/analytics/summary` and `POST /api/ai/monthly-summary` now take `from` and
       `to`; both took nothing at all before, so this was a backend change, not just wiring
+- [x] Query box: `POST /api/ai/ask` turns a question into a structured query the backend
+      runs. The model never sees an expense and never produces a figure — a five-member
+      closed grammar is the boundary, and declining is a member of it rather than an error
+- [x] Text that reads as an expense is signposted to the add box rather than refused
+- [x] 46 pure tests pin the boundary, including the ones that must be refused
+- [x] The never-drop-a-constraint rule moved from three preposition-shaped guards to one
+      whitelist that accounts for every word, checked before any query shape is chosen —
+      "lowest food expense" had walked past all three and answered with a real number
 
 ## Finishing
 

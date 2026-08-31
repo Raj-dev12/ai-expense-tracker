@@ -3,12 +3,16 @@ import { getParser } from "../ai/index.js";
 import { isConversionEnabled } from "../fx/rates.js";
 import { categoryNames } from "../lib/category-store.js";
 import { UNCATEGORISED } from "../lib/categories.js";
+import { describeQuestion, formatAnswer } from "../lib/answer.js";
 import { startOfMonth, todayIso, windowLabel } from "../lib/dates.js";
+import { resolveFilters, runQuestion } from "../lib/insights.js";
 import { categoryTotalsBetween, monthToDate, periodFigures } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import {
+  askRequestSchema,
+  askResultSchema,
   monthlySummaryRequestSchema,
   monthlySummaryResultSchema,
   parseExpenseRequestSchema,
@@ -71,6 +75,86 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
         // the sentence said.
         currency: isConversionEnabled() ? checked.data.suggestion.currency : baseCurrency,
       },
+    };
+  });
+
+  /**
+   * Answer a question about the expenses.
+   *
+   * The model's only job is to say *which* of five shapes was asked for. It
+   * never sees an expense row and never produces a figure — the query it
+   * returns is validated here, run as SQL, and written up from a template. That
+   * is the same division as "the AI never writes to the database": here it is
+   * the AI never computes the money.
+   *
+   * Three ways this ends without an answer, and they are deliberately different:
+   * the grammar has a `unsupported` member for a question outside it, a
+   * `looksLikeExpense` member for text that belongs in the add box, and a 502
+   * for a reply that fails validation. Only the last of those is a fault.
+   */
+  app.post("/api/ai/ask", async (request) => {
+    const input = validate(askRequestSchema, request.body, "question");
+    const { id: userId, baseCurrency } = await getDemoUser();
+
+    const today = todayIso();
+    const window = {
+      from: input.from ?? startOfMonth(today),
+      to: input.to ?? today,
+    };
+
+    const parser = getParser();
+    const result = await parser.askQuestion({
+      question: input.question,
+      today,
+      baseCurrency,
+      // Read fresh, so a filter can only name a category that really exists.
+      categories: await categoryNames(),
+      ...window,
+    });
+
+    const checked = askResultSchema.safeParse(result);
+    if (!checked.success) {
+      request.log.error(
+        { provider: parser.name, issues: checked.error.issues },
+        "parser returned an unusable question",
+      );
+      throw new HttpError(502, "The parser returned something unusable");
+    }
+
+    const question = checked.data.question;
+    const base = { provider: checked.data.producedBy, saved: false as const };
+
+    if (question.kind === "looksLikeExpense") {
+      return {
+        ...base,
+        answerable: false,
+        looksLikeExpense: true,
+        answer: "That looks like an expense rather than a question.",
+        reading: null,
+      };
+    }
+
+    if (question.kind === "unsupported") {
+      return {
+        ...base,
+        answerable: false,
+        looksLikeExpense: false,
+        answer: question.reason,
+        reading: null,
+      };
+    }
+
+    // A category that does not exist is a 400 naming the ones that do, never a
+    // silently empty answer — which would read as "you spent nothing on that".
+    const filters = await resolveFilters(question.filters, window);
+    const answer = await runQuestion(userId, question, filters);
+
+    return {
+      ...base,
+      answerable: true,
+      looksLikeExpense: false,
+      answer: formatAnswer(answer, question, filters, baseCurrency),
+      reading: describeQuestion(question, filters),
     };
   });
 

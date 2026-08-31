@@ -6,6 +6,7 @@ import { resolveCategory } from "../lib/category-store.js";
 import { storedAmountFor } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { toMoneyString } from "../lib/money.js";
+import { likePattern } from "../lib/sql.js";
 import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import {
@@ -112,14 +113,10 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     // spent nothing on that" rather than "there is no such category".
     if (query.category) filters.push(eq(expenses.category, await resolveCategory(query.category)));
     if (query.search) {
-      // % and _ are wildcards in a LIKE pattern, so a search for "50%" would
-      // otherwise match far more than the person asked for. A backslash is
-      // escaped too, because a backslash is what does the escaping. The value
-      // itself is still sent as a parameter, never glued into the SQL.
-      const term = query.search.replace(/[\\%_]/g, (character) => `\\${character}`);
-      filters.push(
-        or(ilike(expenses.merchant, `%${term}%`), ilike(expenses.description, `%${term}%`))!,
-      );
+      // The escaping moved to lib/sql.ts when the question executor needed the
+      // same rule. It has been wrong once already, so it exists in one place.
+      const term = likePattern(query.search);
+      filters.push(or(ilike(expenses.merchant, term), ilike(expenses.description, term))!);
     }
     if (query.minAmount !== undefined) {
       // The comparison happens in the database against the decimal column, so

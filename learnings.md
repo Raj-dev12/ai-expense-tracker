@@ -1052,6 +1052,18 @@ want when someone asks you about the project in six months.
 | The summary card stamps the time it was written | Alongside the provider credit | The parser is deterministic: asked twice about unchanged figures it returns the identical sentence, so a re-run left the card looking exactly as it did — which is precisely how it was reported as broken. The clock is the only thing that can change when the words cannot. |
 | The pie panel opens on click and closes on click | Not on hover | A panel that vanishes when the pointer drifts cannot be read to the end, cannot be scrolled, and does not exist on a touchscreen. Clicking to open and clicking away to close is the contract a menu has, and it works with a finger. The legend rows are buttons because an SVG slice cannot be reached with a keyboard. |
 | Builds are run emitting, not just `--noEmit` | `npm run build` in the gate, and never piped to `tail` | A syntax error slipped past a typecheck that had been run before the edit and not after, the Docker build failed, and `docker compose up -d --build` started the previous image anyway — healthcheck green, stale code. A failed build and a successful one both end with a container starting; the difference is in the lines `tail` throws away. |
+| The model picks the question; the database computes the answer | A structured query, validated, then run as SQL and written from a template | The same division as "the AI never writes to the database" — here it is the AI never computes the money. The model never sees an expense row and never produces a figure, so a wrong answer from this feature can only be a wrong *question*, never wrong arithmetic. Handing it a pile of expenses to reason over would put a language model in the middle of somebody's totals. |
+| The grammar is the boundary | A five-member closed union, checked with `z.discriminatedUnion` | Not a judgement call at runtime: what can be expressed is answerable and what cannot is refused, and the line is in a file rather than in a prompt. A discriminated union also means an invented `kind` is refused by the shape rather than falling through a switch into whichever branch happens to be last. |
+| Declining is a member of the grammar, not an error | `unsupported` and `looksLikeExpense` sit alongside the three query shapes | A model with no legitimate way to say no will decline badly — it forces a bad fit onto whichever shape is closest and answers a question about money that nobody asked. Giving it a first-class way out is what makes the refusal reliable. |
+| An expense typed into the question box gets a signpost, not a refusal | Its own grammar member, and its own sentence pointing at the add box | Two text boxes on one page that both take a sentence is this feature's one real hazard. The likeliest mistake deserves the most useful reply, and "unsupported" explains nothing to somebody who simply used the wrong box. A merchant is not required to trigger it: "42 euros yesterday" is every bit as much an expense. |
+| Never silently drop a constraint | Unreadable shop, unreadable date, or a subject that is not a category — all refuse | Found the hard way: "why did I spend so much on food" came back with a real total for the whole period, because "why" reached the totals rule and "food" was quietly ignored. Answering the wider question produces a correct figure that answers nothing that was asked, which is the worst thing this feature can do. |
+| Out of scope is checked before any rule can match | A word list run first, ahead of the shape rules | "Why did I spend so much" contains "spend". Checking scope after the shape rules means the shape rules win, which is exactly how a "why" question got a number. |
+| Answers are templates, never model prose | The backend formats from the computed figures | A model asked to phrase a result can misstate the number it was handed. The trade is that answers read slightly mechanically, which is the right side of a trade about money. |
+| The question box has no button of its own | Enter submits; Summarise keeps the card's one accent colour | Two coloured controls side by side are two things competing for the same glance. One is a fixed action and one is an open field, so they are distinguishable by kind rather than by colour. |
+| `MonthlySummary` became `AnalysisCard` | Renamed when the question box moved in | A component called MonthlySummary containing a query box is the kind of small lie this repository keeps not telling. |
+| The LIKE escaping lives in `lib/sql.ts` | Shared by the expenses search and the question executor | It has been wrong once already — written as a backslash before a dollar inside a template literal, so it escaped the substitution instead of producing a backslash, and every search found nothing. A rule that subtle gets exactly one home. |
+| The never-drop-a-constraint rule is a whitelist, enforced once | `unreadWords` accounts for every word, and runs before any query shape is chosen | It was three guards keyed on prepositions — `at X`, `on X`, `for X` — and "lowest food expense" walked past all of them, because a noun narrows a question without needing one in front of it. A blacklist of the ways a constraint can appear is a list of the cases somebody thought of; a whitelist that must account for every word is not. Running it before the branching means a sixth query shape inherits the check for free rather than having to remember it. |
+| `KNOWN_WORDS` holds no domain nouns | Grammar, the query vocabulary, units of time — nothing else | Adding "food" to make one question work would be the original bug wearing the guard's clothes. A test asserts an unknown noun is still caught, so that temptation fails loudly rather than quietly. |
 
 ---
 
@@ -2735,3 +2747,191 @@ calendar. Twelve new pure checks pin the arithmetic to fixed dates rather than t
 today happens to be, including a Sunday belonging to the week that began the Monday before,
 and three quarters back from Q1 landing in the previous year. 67 backend tests, three
 *emitting* builds, all render checks, all seven MCP tools over stdio.
+
+### Session 26 — the query box, and a boundary that had to be tested before it was believed
+
+**The shape**
+
+```
+question → model → structured query → Zod → SQL → template → answer
+                    (the model stops here)
+```
+
+The model's only job is to say *which of five shapes* was asked for. It never
+sees an expense row and never produces a figure: it is handed the question,
+today's date, the live category list and the base currency, and nothing else.
+The database computes every number and a template writes it down.
+
+That is the same division as "the AI never writes to the database". Here it is
+**the AI never computes the money** — and it is the reason a wrong answer from
+this feature can only ever be a wrong *question*, never a wrong arithmetic
+result.
+
+**The grammar is the boundary**
+
+Five members, one closed union:
+
+```ts
+| { kind: "unsupported"; reason }
+| { kind: "looksLikeExpense" }
+| { kind: "aggregate";   measure, filters }
+| { kind: "topExpenses"; order, limit, filters }
+| { kind: "topBuckets";  bucket, measure, order, limit, filters }
+```
+
+Validated with `z.discriminatedUnion`, so an invented `kind` is refused by the
+shape rather than falling through a switch into whichever branch is last.
+
+The two non-answers are *members of the grammar*, not error paths. That is
+deliberate and it is the most important decision in the feature: **a model with
+no legitimate way to decline will decline badly.** It will force a bad fit onto
+whichever shape is closest, and answer a question about money that nobody asked.
+
+**The bug that proved the point**
+
+The first live run of the boundary:
+
+```
+"why did I spend so much on food"
+  ANSWERED: You spent €5,259.28 between 1 January and 31 August, across 95 expenses.
+```
+
+Exactly the failure the brief was written to prevent, and it was in my own rules
+rather than in a model. "Why" passed the question-word check, then the totals
+rule matched on the word "spend", and "food" — which is not a category — was
+silently dropped. A real figure, correct arithmetic, answering nothing that was
+asked.
+
+Two guards fixed it, and both generalise:
+
+- an explicit out-of-scope list checked **before any rule can find something to
+  match on** — why, should, will, budget, advice, than, versus
+- a subject check: `on food`, `for petrol`. If what the question narrows to is
+  not a category, not part of a date that was understood, and not a harmless
+  word, it is refused rather than widened
+
+Together with the shop check already there, the rule the mock is built around is
+now enforced in three places: **never silently drop a constraint.** Answering the
+wider question produces a real number that answers something nobody asked, which
+is the worst outcome this feature has available to it.
+
+**The one thing I would not have caught by reading**
+
+That bug does not look like a bug in the source. Every individual rule is
+correct; the failure is in their *order* and in what none of them noticed. It
+took running twelve questions through the live endpoint and reading the answers
+one by one. Design review would not have found it.
+
+**The mock is the default, so the refusals are the default**
+
+With `AI_PROVIDER=mock` — no key, the state anyone gets by cloning — every
+refusal path above is the ordinary experience rather than something that only
+appears when somebody has a key. The boundary is therefore exercised constantly
+instead of theoretically.
+
+Twenty-eight new tests pin it, all pure: no database, no network, no key. The
+refusals matter more than the answers there, and the tests say so — a wrong
+"unsupported" is a mild annoyance, a wrong answer is a figure that looks right.
+
+**Layout: one accent colour per card**
+
+The question box sits under a hairline in the same card as the period dropdown
+and the Summarise button, and has **no button of its own**. Summarise keeps the
+accent because it is a fixed action; Enter submits the question. Two coloured
+controls side by side would be two things competing for the same glance.
+
+The real hazard is that the page now has two text boxes that both take a
+sentence. That is exactly why `looksLikeExpense` is its own grammar member: the
+likeliest mistake gets a signpost to the add box rather than a refusal that
+explains nothing.
+
+**A rename, because the name had stopped being true**
+
+`MonthlySummary.tsx` became `AnalysisCard.tsx`. A component called
+MonthlySummary containing a query box is the kind of small lie this repository
+keeps not telling.
+
+**Also**
+
+The LIKE escaping moved to `lib/sql.ts`. The question executor needed the same
+rule, and that rule has been wrong once already — written as `` `\${character}` ``
+inside a template literal, where the backslash escapes the dollar sign, so every
+search looked for eleven literal characters and found nothing. A rule that subtle
+gets one home.
+
+**Not verified**
+
+The Claude and OpenAI adapters implement `askQuestion` with structured output
+against the same Zod schema, and neither has been run against a live provider —
+there is no key here. That is the same status the parse and summary adapters have
+always had. The mock path is verified end to end.
+
+### Session 27 — the same leak on a fourth branch, and why patching branches was never going to work
+
+**The report**
+
+> "lowest food expense" returned the lowest expense overall — "food" isn't a
+> category, so it was silently dropped and I got a correct number answering a
+> question I didn't ask.
+
+Reproduced immediately, and it was worse than reported. Three of four leaked:
+
+```
+"lowest food expense"    ANSWERED  ...was €9.68 at HSL on 23 July 2026.
+"highest food week"      ANSWERED  ...was the week of 3 August, at €692.68.
+"which month for food"   refused
+"biggest food shop"      ANSWERED  ...was S-Market, at €452.12.
+```
+
+**Why the previous fix was the wrong shape**
+
+The guards added last session keyed on *prepositions*: `at X` for a shop, `on X`
+or `for X` for a subject. "Which month for food" was caught because it happens to
+say "for". The other three say nothing of the kind — a noun sitting next to
+another noun narrows a question perfectly well without a preposition in front of
+it.
+
+So it was never one missing branch. It was a **blacklist of the ways a constraint
+can appear**, and a blacklist of natural language will always be missing one. The
+instruction to enforce the rule once rather than patch the path was exactly
+right, and the reason it works is that it forces the opposite shape.
+
+**A whitelist that has to account for every word**
+
+`unreadWords` removes everything the rules understood — the matched category, the
+matched shop, the grammar and query vocabulary, bare numbers — and whatever is
+still standing was a constraint nobody read.
+
+It runs **once, before any query shape is chosen**, so there is no branch to
+forget it on. That is a structural guarantee rather than a promise to remember:
+adding a sixth query shape tomorrow inherits the check for free, because the
+check happens before the choice.
+
+The three preposition guards are gone. One replaces all of them.
+
+**The list that must never grow a domain noun**
+
+`KNOWN_WORDS` holds grammar, the vocabulary of the query shapes, and units of
+time. Nothing else. Adding "food" to it to make one question work would be the
+original bug wearing the guard's clothes, and there is a test asserting that an
+unknown noun is still caught precisely so that temptation fails loudly.
+
+**Fifteen new tests, one per branch**
+
+The eight leak cases are written out by branch — topExpenses, each bucket, the
+aggregate — because the whole point of enforcing this in one place is that a
+fourth branch cannot miss it, and those are the tests that would fail if somebody
+moved it back into the branches. 113 tests now, up from 98.
+
+**Both directions, checked**
+
+A guard like this fails in two ways, and only checking one of them is how you
+trade a leak for a wall. Eleven real questions were run afterwards — every shape,
+with categories, with shops, with a named month — and all eleven still answer.
+
+**The lesson**
+
+**A blacklist of natural language is a list of the cases you have thought of.**
+When the rule is "never let something through unnoticed", the only shape that
+holds is one that accounts for everything and refuses the remainder — and it has
+to sit before the branching, not inside it.

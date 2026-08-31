@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
+  askQuestion,
   createCategory,
   createExpense,
   deleteCategory,
@@ -21,6 +22,7 @@ import {
   type DeleteMode,
   type Expense,
   type ExpensePatch,
+  type AskAnswer,
   type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
   type ParseResponse,
@@ -34,7 +36,7 @@ import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie } from "./components/CategoryPie";
 import { DayView } from "./components/DayView";
-import { MonthlySummary } from "./components/MonthlySummary";
+import { AnalysisCard } from "./components/AnalysisCard";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
@@ -107,6 +109,16 @@ export default function App() {
 
   const [monthly, setMonthly] = useState<MonthlySummaryResponse | null>(null);
   const [monthlyAt, setMonthlyAt] = useState<Date | null>(null);
+
+  /**
+   * The question box: what was asked, and what came back.
+   *
+   * Separate from the summary because they fail separately — a question the
+   * parser cannot express should not blank a summary somebody is reading.
+   */
+  const [answer, setAnswer] = useState<AskAnswer | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [monthlyError, setMonthlyError] = useState<string | null>(null);
 
@@ -478,6 +490,27 @@ export default function App() {
     setMonthly(null);
     setMonthlyAt(null);
     setPieCategory(null);
+    // The answer was computed over the old period, so it would be describing a
+    // stretch of time the card no longer shows.
+    setAnswer(null);
+    setAskError(null);
+  }
+
+  async function handleAsk(question: string) {
+    if (asking) return;
+
+    setAsking(true);
+    setAskError(null);
+
+    try {
+      // Scoped to the period the card is showing, unless the question names its
+      // own dates — in which case the parser fills them in and they win.
+      setAnswer(await askQuestion(question, windowFor(period)));
+    } catch (caught) {
+      setAskError(caught instanceof ApiError ? caught.message : "Could not answer that");
+    } finally {
+      setAsking(false);
+    }
   }
 
   async function handleSummarise() {
@@ -595,7 +628,7 @@ export default function App() {
             {summary && <SummaryCards summary={summary} currency={currency} />}
 
             {summary && (
-              <MonthlySummary
+              <AnalysisCard
                 period={period}
                 onPeriodChange={handlePeriodChange}
                 summary={monthly}
@@ -603,6 +636,10 @@ export default function App() {
                 loading={monthlyLoading}
                 error={monthlyError}
                 onRequest={handleSummarise}
+                answer={answer}
+                asking={asking}
+                askError={askError}
+                onAsk={handleAsk}
               />
             )}
 

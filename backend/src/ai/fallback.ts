@@ -1,5 +1,7 @@
 import { mockParser } from "./mock.js";
 import type {
+  AskRequest,
+  AskResult,
   ExpenseParser,
   MonthlySummaryRequest,
   MonthlySummaryResult,
@@ -47,6 +49,17 @@ export function withMockFallback(parser: ExpenseParser): ExpenseParser {
       } catch (error) {
         report("parse", error);
         return mockParser.parseExpense(request);
+      }
+    },
+
+    async askQuestion(request: AskRequest): Promise<AskResult> {
+      try {
+        return await parser.askQuestion(request);
+      } catch (error) {
+        report("question", error);
+        // The mock's own result says producedBy: "mock", so the page credits
+        // whoever actually answered without this wrapper having to say anything.
+        return mockParser.askQuestion(request);
       }
     },
 

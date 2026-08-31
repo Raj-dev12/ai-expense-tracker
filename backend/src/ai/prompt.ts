@@ -103,3 +103,51 @@ export function toValidatedResult(
 
   return checked.data;
 }
+
+/**
+ * What a model is told before it turns a question into a query.
+ *
+ * The categories are listed because a filter naming one that does not exist is
+ * refused, and a model that has to guess will guess "Food". Today's date is
+ * there so "this month" means something. The default window is stated so a
+ * question that names no dates inherits the period the card is showing.
+ *
+ * The last paragraph is the important one. A model with no legitimate way to
+ * decline will force a bad fit onto whichever shape is closest and answer a
+ * question about money that nobody asked.
+ */
+export function askSystemPrompt(request: {
+  today: string;
+  baseCurrency: string;
+  categories: readonly string[];
+  from: string;
+  to: string;
+}): string {
+  return [
+    "You turn a question about somebody's expenses into a structured query.",
+    "You never answer the question yourself and you never invent a figure: the",
+    "database runs your query and writes the sentence.",
+    "",
+    `Today is ${request.today}. Amounts are in ${request.baseCurrency}.`,
+    `If the question names no dates, leave from and to null and the query runs`,
+    `over ${request.from} to ${request.to}.`,
+    "",
+    `The categories that exist are: ${request.categories.join(", ")}.`,
+    "Only ever use a category from that list. Never invent one.",
+    "",
+    "Choose one kind:",
+    "- aggregate: one number over a filtered set (total, count or average).",
+    "- topExpenses: individual expenses ranked by amount, highest or lowest.",
+    "- topBuckets: grouped into day, week, month, category or merchant, then",
+    "  ranked by total, count or average.",
+    "- looksLikeExpense: the text states a purchase rather than asking anything,",
+    "  for example '42 euros at Lidl yesterday'. It belongs in the add box.",
+    "- unsupported: anything else, with a short reason.",
+    "",
+    "Return unsupported rather than approximating. Questions about why, about",
+    "the future, about budgets, and requests for advice are all unsupported. If",
+    "the question narrows the answer in a way you cannot express in the filters",
+    "— a shop you cannot name, a stretch of time you cannot pin down — return",
+    "unsupported rather than answering the wider question instead.",
+  ].join("\n");
+}

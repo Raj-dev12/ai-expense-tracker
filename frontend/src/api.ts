@@ -407,6 +407,41 @@ const monthlySummarySchema = z.object({
 
 export type MonthlySummary = z.infer<typeof monthlySummarySchema>;
 
+const askSchema = z.object({
+  provider: z.string(),
+  // Asking a question must not change anything, asserted the same way the parse
+  // endpoint's promise is.
+  saved: z.literal(false),
+  answerable: z.boolean(),
+  /**
+   * True when the text was a purchase rather than a question. Distinct from a
+   * plain refusal, because the useful reply is a signpost to the add box rather
+   * than a list of what can be asked.
+   */
+  looksLikeExpense: z.boolean(),
+  answer: z.string(),
+  /** How the question was read. Null when there was nothing to run. */
+  reading: z.string().nullable(),
+});
+
+export type AskAnswer = z.infer<typeof askSchema>;
+
+/**
+ * Ask a question about the expenses. Saves nothing.
+ *
+ * The model turns the sentence into a structured query; the backend runs it and
+ * writes the sentence. No number in the reply was produced by a language model.
+ */
+export function askQuestion(
+  question: string,
+  window?: { from: string; to: string },
+): Promise<AskAnswer> {
+  return request("/api/ai/ask", askSchema, {
+    method: "POST",
+    body: JSON.stringify({ question, ...(window ?? {}) }),
+  });
+}
+
 /** Ask for a written summary of a window. Saves nothing. */
 export function getMonthlySummary(window?: { from: string; to: string }): Promise<MonthlySummary> {
   return request("/api/ai/monthly-summary", monthlySummarySchema, {

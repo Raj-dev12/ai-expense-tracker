@@ -91,6 +91,19 @@ export function windowLabel(from: string, to: string): string {
   return `In the period ${at(from)} to ${at(to)}`;
 }
 
+/** "2026-08-24" becomes "24 August 2026". For prose, never for storage. */
+const dayLabelFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+export function dayLabel(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return dayLabelFormatter.format(new Date(Date.UTC(year!, month! - 1, day!)));
+}
+
 /** Shift a YYYY-MM-DD date by a number of days. Negative goes backwards. */
 export function addDays(iso: string, days: number): string {
   const [year, month, day] = iso.split("-").map(Number);

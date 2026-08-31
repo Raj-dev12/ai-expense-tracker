@@ -23,8 +23,9 @@ that writes a row. Below the box, a dashboard shows the month's total against th
 stretch of last month, a pie of where the money went, a fourteen-week trend line, a table of any single day you
 pick, and every expense in a list that scrolls inside its own box. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
 and every amount is shown in it; changing it later moves no stored number. A
-button asks the AI to describe the month in a sentence or two, and the card underneath it says
-which parser actually wrote that sentence. Any row in the list can be corrected in place or deleted,
+button asks the AI to describe the period in a sentence or two, and a box beside it answers
+specific questions — "highest week for groceries" — by turning them into a query the database
+runs rather than letting a model near the arithmetic. Any row in the list can be corrected in place or deleted,
 using the same chips the confirm step uses, and categories can be added and removed. An MCP server lets an outside AI assistant query
 the same data, add expenses and correct them, through the same API a browser uses.
 
@@ -139,6 +140,61 @@ Clone this repository, set no keys at all, and every part of the app works. Set
 instead. If that provider errors, times out, or returns something that fails validation, the
 request falls back to the mock rather than failing — and the response names the parser that
 *actually* answered, not the one configured, because on a fallback those differ.
+
+## Asking questions
+
+Alongside the summarise button there is a box for specific questions — *"biggest expense in
+travel"*, *"highest week for groceries"*, *"which month did I spend most on restaurants"*.
+
+**The model picks the question; the database computes the answer.** It is handed the
+question, today's date, the category list and the base currency — never an expense row — and
+its only job is to fill in one of five shapes:
+
+```ts
+| { kind: "unsupported"; reason }      // outside the grammar, said plainly
+| { kind: "looksLikeExpense" }         // belongs in the add box
+| { kind: "aggregate";   measure, filters }
+| { kind: "topExpenses"; order, limit, filters }
+| { kind: "topBuckets";  bucket, measure, order, limit, filters }
+```
+
+That query is validated with Zod, run as SQL, and written up from a template. **No figure in
+an answer was produced by a language model** — which is the same division as the confirm step,
+one layer along: there, the AI never writes to the database; here, it never computes the money.
+
+### The boundary, and what happens outside it
+
+The grammar *is* the boundary — what it can express is answerable, and what it cannot is
+refused. Declining is a member of the grammar rather than an error path, because a model with
+no legitimate way to say no will force a bad fit onto whichever shape is closest and answer a
+question about money that nobody asked.
+
+Deliberately out of scope: **why** questions, predictions and budgets, advice, and comparing
+one thing against another.
+
+| Situation | What happens |
+|---|---|
+| Outside the grammar | says so, and says what it *can* do |
+| Text that reads as an expense | points at the add box rather than refusing |
+| A category that does not exist | 400 naming the ones that do |
+| A shop or a date it cannot pin down | refuses rather than answering the wider question |
+| A valid query matching nothing | "Nothing matches that" — never `€0.00` |
+| A reply that fails validation | 502, the same as the parser |
+
+The last of those rules is the one worth stating twice: **a constraint that cannot be read is
+never silently dropped.** Answering the wider question produces a correct figure that answers
+nothing that was asked, which is the worst thing this feature could do.
+
+It is enforced in one place, and that place is a *whitelist*: every word of a question must be
+something the rules understand, or a category or shop they matched, or the question is
+refused naming what was left over. It began as three guards keyed on prepositions — `at X`,
+`on X` — and "lowest food expense" walked past all three, because a noun narrows a question
+without needing one. A blacklist of the ways a constraint can appear is a list of the cases
+somebody thought of. The check runs before any query shape is chosen, so a new shape inherits
+it rather than having to remember it.
+
+With no API key the offline rules handle a narrow set of patterns and refuse everything else,
+so the refusal paths are the ordinary experience rather than something you only see with a key.
 
 ## The currency is the first question
 
@@ -284,6 +340,7 @@ GET    /api/settings            the currency, whether it was chosen, and the ISO
 PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
 POST   /api/ai/monthly-summary  from, to; a period in a sentence or two, saves nothing
+POST   /api/ai/ask              a question in, a computed answer out, saves nothing
 ```
 
 Unknown query parameters are rejected with a 400 rather than ignored, because

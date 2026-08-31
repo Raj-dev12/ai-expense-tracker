@@ -86,4 +86,82 @@ export interface ExpenseParser {
   readonly name: AiProviderName;
   parseExpense(request: ParseRequest): Promise<ParseResult>;
   summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult>;
+  /**
+   * Turn a question into a structured query. It answers nothing itself — the
+   * backend runs the query and formats the sentence.
+   */
+  askQuestion(request: AskRequest): Promise<AskResult>;
 }
+
+// ---------------------------------------------------------------------------
+// Asking questions
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed grammar a question has to fit into.
+ *
+ * This union *is* the boundary. A question that can be expressed here is
+ * answerable; one that cannot is refused, and there is no third path where
+ * something almost fits. That is the whole point: the model chooses which of
+ * these shapes was asked for, and the database computes the number. The model
+ * never sees an expense and never produces a figure, which is the same division
+ * of labour as "the AI never writes to the database".
+ *
+ * `unsupported` and `looksLikeExpense` are members of the grammar rather than
+ * error paths. A model with no legitimate way to decline will decline badly —
+ * it will force a bad fit onto whichever shape is closest, and answer a question
+ * about money that nobody asked.
+ */
+export type QuestionMeasure = "total" | "count" | "average";
+export type QuestionOrder = "highest" | "lowest";
+export type QuestionBucket = "day" | "week" | "month" | "category" | "merchant";
+
+export type QuestionFilters = {
+  category?: string | null;
+  merchant?: string | null;
+  from?: string | null;
+  to?: string | null;
+};
+
+export type StructuredQuestion =
+  /** Outside the grammar. Says so rather than guessing. */
+  | { kind: "unsupported"; reason: string }
+  /**
+   * An amount with no question in it — almost certainly meant for the add box at
+   * the top of the page. The most likely mistake with two text boxes on one
+   * screen, so it gets a signpost of its own rather than a flat refusal.
+   */
+  | { kind: "looksLikeExpense" }
+  /** One number over a filtered set: how much, how many, the average. */
+  | { kind: "aggregate"; measure: QuestionMeasure; filters: QuestionFilters }
+  /** Individual expenses, ranked by amount. */
+  | { kind: "topExpenses"; order: QuestionOrder; limit: number; filters: QuestionFilters }
+  /** Grouped into days, weeks, months, categories or shops, then ranked. */
+  | {
+      kind: "topBuckets";
+      bucket: QuestionBucket;
+      measure: QuestionMeasure;
+      order: QuestionOrder;
+      limit: number;
+      filters: QuestionFilters;
+    };
+
+export type AskRequest = {
+  question: string;
+  today: string;
+  baseCurrency: string;
+  /**
+   * The categories that currently exist, so a model can only filter by one that
+   * is really there — and so the mock can match names it was never compiled
+   * with.
+   */
+  categories: readonly string[];
+  /** The period the card is showing. Used when the question names no range. */
+  from: string;
+  to: string;
+};
+
+export type AskResult = {
+  question: StructuredQuestion;
+  producedBy: AiProviderName;
+};
