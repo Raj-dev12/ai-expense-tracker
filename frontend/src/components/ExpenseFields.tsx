@@ -1,4 +1,4 @@
-import { CATEGORY_NAMES, CURRENCIES, type CategoryName } from "../api";
+import { CURRENCIES, type CategoryName } from "../api";
 import { Chip, fieldClass } from "./Chip";
 
 /**
@@ -43,6 +43,7 @@ export function ExpenseFields({
   onChange,
   autoFocusAmount = false,
   showCurrency = true,
+  categories,
 }: {
   values: ExpenseFieldValues;
   onChange: (patch: Partial<ExpenseFieldValues>) => void;
@@ -54,6 +55,9 @@ export function ExpenseFields({
    * nothing happened.
    */
   showCurrency?: boolean;
+  /** The categories that currently exist, from the server. Choosing only —
+   *  making and removing them lives in the Categories panel. */
+  categories: string[];
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -97,9 +101,16 @@ export function ExpenseFields({
         <select
           className={fieldClass}
           value={values.category}
-          onChange={(event) => onChange({ category: event.target.value as CategoryName })}
+          onChange={(event) => onChange({ category: event.target.value })}
         >
-          {CATEGORY_NAMES.map((name) => (
+          {/* The saved category may have been deleted while this form was open.
+              Showing it anyway beats silently switching to something else
+              underneath somebody; the backend refuses the save with a message
+              that explains it. */}
+          {(categories.includes(values.category)
+            ? categories
+            : [values.category, ...categories]
+          ).map((name) => (
             <option key={name} value={name}>
               {name}
             </option>

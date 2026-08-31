@@ -19,10 +19,12 @@
  * that caused that bug. Treat them as a tripwire, not as proof.
  */
 import { renderToStaticMarkup } from "react-dom/server";
+import { createCategory, deleteCategory, deleteExpense } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
+import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
 import { buildPatch } from "./components/ExpenseEditor";
 import { MonthlySummary } from "./components/MonthlySummary";
@@ -30,6 +32,8 @@ import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
 import { TrendChart } from "./components/TrendChart";
+
+const TEST_CATEGORIES = ["Groceries", "Restaurants", "Uncategorised"];
 
 function check(label: string, condition: boolean, detail = "") {
   console.log(`${condition ? "ok  " : "FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
@@ -59,6 +63,7 @@ const review = renderToStaticMarkup(
     provider="mock"
     saving={false}
     showCurrency={true}
+    categories={TEST_CATEGORIES}
     onSave={() => {}}
     onCancel={() => {}}
   />,
@@ -77,7 +82,9 @@ const noAmount = renderToStaticMarkup(
       amount: null, currency: "EUR", merchant: null, category: "Other",
       description: "coffee", expenseDate: "2026-08-31",
     }}
-    confidence={0.4} provider="mock" saving={false} showCurrency={true} onSave={() => {}} onCancel={() => {}}
+    confidence={0.4} provider="mock" saving={false} showCurrency={true}
+    categories={TEST_CATEGORIES}
+    onSave={() => {}} onCancel={() => {}}
   />,
 );
 check("missing amount is explained", noAmount.includes("No amount was found"));
@@ -193,6 +200,8 @@ const expenses: Expense[] = [
 const listProps = {
   currency: "EUR",
   showCurrency: true,
+  categories: TEST_CATEGORIES,
+  onDelete: () => {},
   editingId: null,
   savingEdit: false,
   editError: null,
@@ -404,5 +413,144 @@ check("first visit: names the one that will be used", choice.includes("Use EUR")
 // No skip. Every screen behind this one needs an answer, so offering a way past
 // it would only produce amounts with no symbol.
 check("first visit: cannot be skipped", !/skip|later|dismiss/i.test(choice.replace(/change it later/gi, "")));
+
+// 12. Categories are data, and can be added and removed.
+const withCats = renderToStaticMarkup(
+  <RecentExpenses expenses={expenses} total={97} {...listProps} editingId={expenses[0]!.id} />,
+);
+check("category box offers the live list, not a compiled-in one", TEST_CATEGORIES.every((name) => withCats.includes(`>${name}</option>`)));
+// The dropdown chooses and nothing else now. Making a category moved to the
+// Categories panel, so a control that sometimes turns into a text box is gone.
+check("category box no longer doubles as a create form", !withCats.includes("+ Type a new category"));
+// The saved category may have been deleted while the form was open. Dropping it
+// silently would change somebody's expense underneath them.
+const orphaned = renderToStaticMarkup(
+  <RecentExpenses
+    expenses={[{ ...expenses[0]!, category: "Deleted thing" }]}
+    total={1}
+    {...listProps}
+    editingId={expenses[0]!.id}
+  />,
+);
+check("a category that no longer exists is still shown, not swapped", orphaned.includes(">Deleted thing</option>"));
+
+// 13. Deleting an expense asks first, and says what goes.
+check("every row offers a delete", (list.match(/>Delete</g) ?? []).length === expenses.length);
+check("deleting is not one click", !list.includes("This cannot be undone"));
+
+// 14. The category manager.
+const manager = renderToStaticMarkup(
+  <CategoryManager
+    categories={[
+      { name: "Groceries", expenseCount: 28 },
+      { name: "Travel", expenseCount: 0 },
+      { name: "Uncategorised", expenseCount: 3 },
+    ]}
+    uncategorised="Uncategorised"
+    busy={false}
+    error={null}
+    onAdd={() => {}}
+    onRename={() => {}}
+    onDelete={() => {}}
+  />,
+);
+check("manager: lists the categories", manager.includes("Groceries") && manager.includes("Travel"));
+check("manager: shows how full each one is", manager.includes("28 expenses") && manager.includes("0 expenses"));
+check("manager: singular for one", manager.includes("3 expenses"));
+// Uncategorised is where a delete sends things, so it cannot itself go.
+check("manager: Uncategorised has no delete", (manager.match(/>Delete</g) ?? []).length === 2);
+check("manager: says why it is kept", manager.includes(">kept</span>"));
+
+// Adding lives here now, not in the dropdown.
+check("manager: has an add box", manager.includes("Add a category"));
+// Renaming is offered on every category except the one that cannot be renamed.
+check("manager: offers rename", (manager.match(/>Rename</g) ?? []).length === 2);
+
+// 16. Renaming warns about the expenses it will rewrite.
+//
+// An expense stores its category as text, so a rename is not just a label
+// change — it rewrites rows. Saying so before it happens is the whole point.
+const renamingFull = renderToStaticMarkup(
+  <CategoryManager
+    categories={[{ name: "Groceries", expenseCount: 28 }]}
+    uncategorised="Uncategorised"
+    busy={false}
+    error={null}
+    onAdd={() => {}}
+    onRename={() => {}}
+    onDelete={() => {}}
+  />,
+);
+check("manager: a category with expenses shows its count", renamingFull.includes("28 expenses"));
+
+// 17. The list shows everything, in a box that does not grow the page.
+const wholeList = renderToStaticMarkup(
+  <RecentExpenses expenses={expenses} total={expenses.length} {...listProps} />,
+);
+check("list: says the count plainly when it holds everything", wholeList.includes("2 expenses"));
+check("list: scrolls inside a fixed height", wholeList.includes("max-h-") && wholeList.includes("overflow-y-auto"));
+const partial = renderToStaticMarkup(
+  <RecentExpenses expenses={expenses} total={500} {...listProps} />,
+);
+check("list: still says showing N of M when it does not", partial.includes("showing 2 of 500"));
+
+// 15. Requests only announce JSON when they are actually sending some.
+//
+// This is a regression guard, not a feature test. Fastify refuses a request that
+// sets Content-Type: application/json and then sends no body, so a DELETE with
+// that header is a 400 before it reaches any route. The same bug was fixed in
+// the MCP server's client in hour 4 and came back here, because the browser and
+// the MCP server build their requests separately. If the header is ever made
+// unconditional again, these fail.
+{
+  const sent: Array<{ url: string; init: RequestInit }> = [];
+  const original = globalThis.fetch;
+
+  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
+    sent.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      // Deliberately not a valid response for any of these. Every call below is
+      // caught, because what is being asserted is the request that went out, not
+      // the reply that came back.
+      json: async () => ({}),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+
+  const headersOf = (init: RequestInit) => new Headers(init.headers as HeadersInit);
+
+  await deleteExpense("11111111-1111-4111-8111-111111111111").catch(() => {});
+  check(
+    "DELETE an expense sends no Content-Type",
+    !headersOf(sent.at(-1)!.init).has("content-type"),
+    [...headersOf(sent.at(-1)!.init).keys()].join(", ") || "no headers",
+  );
+
+  await deleteCategory("Travel", "reassign").catch(() => {});
+  const categoryCall = sent.at(-1)!;
+  check(
+    "DELETE a category sends no Content-Type",
+    !headersOf(categoryCall.init).has("content-type"),
+    [...headersOf(categoryCall.init).keys()].join(", ") || "no headers",
+  );
+  // The choice travels in the query string, which is why that request has no
+  // body either — worth asserting, because moving it into a body would quietly
+  // reintroduce the need for the header.
+  check(
+    "the category delete puts its choice in the query string",
+    categoryCall.url.includes("expenses=reassign") && categoryCall.init.body === undefined,
+    categoryCall.url,
+  );
+
+  await createCategory("Coffee").catch(() => {});
+  check(
+    "POST with a body still announces JSON",
+    headersOf(sent.at(-1)!.init).get("content-type") === "application/json",
+    headersOf(sent.at(-1)!.init).get("content-type") ?? "none",
+  );
+
+  globalThis.fetch = original;
+}
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");

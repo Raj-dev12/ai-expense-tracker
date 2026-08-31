@@ -1,40 +1,81 @@
-import { asc } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
-import { db } from "../db/client.js";
-import { categories } from "../db/schema.js";
-import { CATEGORY_NAMES } from "../lib/categories.js";
+import {
+  createCategory,
+  listCategories,
+  removeCategory,
+  renameCategory,
+} from "../lib/category-store.js";
+import { getDemoUser } from "../lib/user.js";
+import { validate } from "../lib/validate.js";
+import {
+  categoryNameParamSchema,
+  createCategorySchema,
+  deleteCategoryQuerySchema,
+  renameCategorySchema,
+} from "../schemas/category.js";
 
 export const categoryRoutes: FastifyPluginAsync = async (app) => {
   /**
-   * The categories that currently exist.
+   * The categories that currently exist, and how full each one is.
    *
-   * Read from the table rather than from the constant, because the table is the
-   * list's home — it is where a category would appear if one were ever added.
-   * Anything asking "what can I file this under?" should ask something that can
-   * change, not a hardcoded array compiled into a client.
-   *
-   * **The table offers; the Zod enum enforces.** `createExpenseSchema` still
-   * validates against `CATEGORY_NAMES`, and that is deliberate: this endpoint
-   * exists to tell callers what to send, not to decide what is acceptable. A
-   * caller that ignores it and invents a category is refused by the schema, the
-   * same as it always was.
-   *
-   * The two lists agree today because the seed writes exactly `CATEGORY_NAMES`.
-   * If a way to add categories is ever built, this endpoint keeps working
-   * unchanged and the enum is the thing that has to become dynamic — which is
-   * worth knowing before that feature is started rather than after.
+   * Read from the table, because the table is the list now. The counts are here
+   * rather than behind a second request because the only screen that needs them
+   * is the one deleting a category, and it needs them before it can ask the
+   * question — "this holds 14 expenses" is the whole point of the confirmation.
    */
   app.get("/api/categories", async () => {
-    const rows = await db
-      .select({ name: categories.name })
-      .from(categories)
-      .orderBy(asc(categories.id));
+    const { id: userId } = await getDemoUser();
+    return { categories: await listCategories(userId) };
+  });
 
-    const names = rows.map((row) => row.name);
+  /**
+   * Add a category.
+   *
+   * Asking for one that already exists returns it rather than failing. The
+   * interface offers this from a "type a new one" box, and somebody typing a
+   * name that happens to be taken has still ended up where they wanted to be.
+   */
+  app.post("/api/categories", async (request, reply) => {
+    const input = validate(createCategorySchema, request.body, "category");
+    const name = await createCategory(input.name);
+    return reply.status(201).send({ name });
+  });
 
-    // An empty table means nothing has been seeded yet. Falling back keeps a
-    // brand new database usable rather than offering a caller no categories at
-    // all, which would make every write fail for a reason nobody could see.
-    return { categories: names.length > 0 ? names : [...CATEGORY_NAMES] };
+  /**
+   * Rename a category, and every expense filed under it.
+   *
+   * One transaction, because an expense keeps its category as text: renaming the
+   * row without rewriting the expenses would leave them pointing at a name that
+   * no longer exists. The response says how many were rewritten, so the
+   * interface can report what actually happened rather than assuming.
+   */
+  app.patch("/api/categories/:name", async (request) => {
+    const { name } = validate(categoryNameParamSchema, request.params, "category name");
+    const input = validate(renameCategorySchema, request.body, "category");
+    const { id: userId } = await getDemoUser();
+
+    const result = await renameCategory(userId, name, input.name);
+
+    request.log.info(result, "category renamed");
+    return result;
+  });
+
+  /**
+   * Remove a category, saying what to do with the expenses in it.
+   *
+   * `?expenses=reassign` moves them to Uncategorised; `?expenses=delete` removes
+   * them with it. There is no default, because both possible guesses are bad:
+   * one destroys data over a renamed label, the other quietly keeps rows
+   * somebody meant to clear out.
+   */
+  app.delete("/api/categories/:name", async (request) => {
+    const { name } = validate(categoryNameParamSchema, request.params, "category name");
+    const query = validate(deleteCategoryQuerySchema, request.query, "options");
+    const { id: userId } = await getDemoUser();
+
+    const result = await removeCategory(userId, name, query.expenses);
+
+    request.log.info(result, "category deleted");
+    return result;
   });
 };

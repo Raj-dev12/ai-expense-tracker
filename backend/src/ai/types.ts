@@ -14,7 +14,13 @@ export type ExpenseSuggestion = {
   amount: number | null;
   currency: string;
   merchant: string | null;
-  category: CategoryName;
+  /**
+   * A plain string, not the CategoryName union. The parsers guess from a fixed
+   * vocabulary, but the categories that exist are rows in a table now, so the
+   * type cannot claim to know them at compile time. The route checks the guess
+   * against the live list before returning it.
+   */
+  category: string;
   description: string | null;
   expenseDate: string;
 };

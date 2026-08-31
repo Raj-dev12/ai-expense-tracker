@@ -30,6 +30,8 @@ in Docker, behind HTTPS.
 | AI safety | Confirm step. AI never writes to the database directly. |
 | Charts | Pie for categories, line for the trend. |
 | Pages | One scrolling page. No routing. |
+| Categories | Editable, not fixed. The interface can add, rename and remove them, all in one panel. |
+| Deleting | Expenses can be deleted from the interface, after a confirmation showing what goes. Deleting a category asks what to do with the expenses in it. |
 
 ---
 
@@ -76,8 +78,11 @@ Three tables. Resist adding a fourth.
 One row, inserted by the seed script.
 
 **categories** — `id`, `name`
-Fixed list: Groceries, Restaurants, Transport, Shopping, Bills, Entertainment, Health,
-Travel, Other.
+Seeded with ten: Groceries, Restaurants, Transport, Shopping, Bills, Entertainment, Health,
+Travel, Other, Uncategorised. **Not a fixed list** — the interface can add and remove them,
+so this table is the source of truth and no constant may override it. `Uncategorised` is a
+real category rather than an empty value, so that deleting a category has somewhere to move
+its expenses to and charts, filters and totals need no special case for "no category".
 
 **expenses** — `id`, `user_id`, `amount`, `currency`, `amount_eur`, `merchant`, `category`,
 `description`, `expense_date`, `created_at`, `source`
@@ -96,6 +101,10 @@ POST   /api/expenses
 GET    /api/expenses            filters: from, to, category, minAmount
 GET    /api/expenses/:id
 DELETE /api/expenses/:id
+GET    /api/categories          the list, with how many expenses each holds
+POST   /api/categories          add one
+PATCH  /api/categories/:name    rename it, and every expense filed under it
+DELETE /api/categories/:name    remove one; says what to do with its expenses
 GET    /api/analytics/summary   total, count, daily average, vs last month
 GET    /api/analytics/categories
 GET    /api/analytics/trend

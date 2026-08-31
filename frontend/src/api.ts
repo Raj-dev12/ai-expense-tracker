@@ -1,14 +1,15 @@
 import { z } from "zod";
 
 /**
- * The nine categories, repeated from the backend.
+ * The categories a fresh database starts with, kept only as a fallback for the
+ * moment before the real list has loaded.
  *
- * Duplicating a list is normally a mistake. Here the alternative is a shared
- * package between two applications, which is a lot of machinery for nine words
- * that have not changed since the plan was written. If they ever do change, the
- * Zod check below fails loudly rather than quietly showing the wrong thing.
+ * It is no longer *the* list. Categories are rows in a table that the interface
+ * can add to and delete from, so anything that needs to know what exists asks
+ * GET /api/categories. Validating against this array would refuse a category
+ * somebody made thirty seconds ago.
  */
-export const CATEGORY_NAMES = [
+export const DEFAULT_CATEGORY_NAMES = [
   "Groceries",
   "Restaurants",
   "Transport",
@@ -28,7 +29,9 @@ const suggestionSchema = z.object({
   amount: z.number().nullable(),
   currency: z.string(),
   merchant: z.string().nullable(),
-  category: z.enum(CATEGORY_NAMES),
+  // A plain string, not an enum. The categories are data now, so a response
+  // naming one this bundle has never heard of is correct rather than corrupt.
+  category: z.string(),
   description: z.string().nullable(),
   expenseDate: z.string(),
 });
@@ -66,7 +69,8 @@ const expenseListSchema = z.object({
 export type Suggestion = z.infer<typeof suggestionSchema>;
 export type ParseResponse = z.infer<typeof parseResponseSchema>;
 export type Expense = z.infer<typeof expenseSchema>;
-export type CategoryName = (typeof CATEGORY_NAMES)[number];
+/** A category is whatever the table says it is. */
+export type CategoryName = string;
 
 /** An error carrying something worth showing a person. */
 export class ApiError extends Error {
@@ -102,7 +106,25 @@ async function request<T>(
   try {
     response = await fetch(path, {
       ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      headers: {
+        /**
+         * Only when there is actually a body.
+         *
+         * Announcing JSON and then sending nothing is rejected outright —
+         * Fastify answers "Body cannot be empty when content-type is set to
+         * 'application/json'" — which turned every DELETE from this page into a
+         * 400. A DELETE has no body: the expense is named in the path, and the
+         * category delete puts its choice in the query string.
+         *
+         * This is the second time this bug has been fixed in this repository.
+         * It was fixed in the MCP server's client in hour 4 and reappeared here,
+         * because the browser and the MCP server are separate applications that
+         * each build their own requests. Both now have the same guard, and there
+         * is a check below that fails if this one is removed.
+         */
+        ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...init?.headers,
+      },
     });
   } catch {
     throw new ApiError("Could not reach the server. Is the backend running?");
@@ -182,6 +204,80 @@ export function updateExpense(id: string, patch: ExpensePatch): Promise<Expense>
 
 export function listExpenses(limit = 5): Promise<{ expenses: Expense[]; total: number }> {
   return request(`/api/expenses?limit=${limit}`, expenseListSchema);
+}
+
+/** Delete an expense. There is no undo, so the interface confirms first. */
+export function deleteExpense(id: string): Promise<{ deleted: Expense }> {
+  return request(`/api/expenses/${id}`, z.object({ deleted: expenseSchema }), {
+    method: "DELETE",
+  });
+}
+
+// --- categories --------------------------------------------------------------
+
+const categorySchema = z.object({ name: z.string(), expenseCount: z.number() });
+
+const categoryListSchema = z.object({ categories: z.array(categorySchema) });
+
+const categoryDeletionSchema = z.object({
+  category: z.string(),
+  expenseCount: z.number(),
+  mode: z.enum(["reassign", "delete"]),
+  reassigned: z.number(),
+  deleted: z.number(),
+});
+
+export type Category = z.infer<typeof categorySchema>;
+export type CategoryDeletion = z.infer<typeof categoryDeletionSchema>;
+export type DeleteMode = "reassign" | "delete";
+
+/** The categories that exist, with how many expenses each holds. */
+export function getCategoryList(): Promise<{ categories: Category[] }> {
+  return request("/api/categories", categoryListSchema);
+}
+
+export function createCategory(name: string): Promise<{ name: string }> {
+  return request("/api/categories", z.object({ name: z.string() }), {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+const categoryRenameSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** How many expenses had their stored category text rewritten. */
+  expensesUpdated: z.number(),
+});
+
+export type CategoryRename = z.infer<typeof categoryRenameSchema>;
+
+/**
+ * Rename a category and every expense filed under it.
+ *
+ * The expenses matter here in a way they do not for most renames: they store the
+ * category as text, so the server rewrites them in the same transaction. The
+ * count comes back so the interface can say what actually happened.
+ */
+export function renameCategory(name: string, to: string): Promise<CategoryRename> {
+  return request(`/api/categories/${encodeURIComponent(name)}`, categoryRenameSchema, {
+    method: "PATCH",
+    body: JSON.stringify({ name: to }),
+  });
+}
+
+/**
+ * Remove a category, saying what to do with the expenses in it.
+ *
+ * The mode is required by the API and by this signature, because there is no
+ * safe guess: one choice destroys expenses, the other keeps them.
+ */
+export function deleteCategory(name: string, mode: DeleteMode): Promise<CategoryDeletion> {
+  return request(
+    `/api/categories/${encodeURIComponent(name)}?expenses=${mode}`,
+    categoryDeletionSchema,
+    { method: "DELETE" },
+  );
 }
 
 // --- analytics ---------------------------------------------------------------

@@ -49,6 +49,7 @@ export function ExpenseEditor({
   saving,
   error,
   showCurrency,
+  categories,
   onSave,
   onCancel,
 }: {
@@ -56,6 +57,7 @@ export function ExpenseEditor({
   saving: boolean;
   error: string | null;
   showCurrency: boolean;
+  categories: string[];
   onSave: (id: string, patch: ExpensePatch) => void;
   onCancel: () => void;
 }) {
@@ -84,6 +86,7 @@ export function ExpenseEditor({
         values={values}
         onChange={(next) => setValues((current) => ({ ...current, ...next }))}
         showCurrency={showCurrency}
+        categories={categories}
       />
 
       {!usable && <p className="text-sm text-slate-500">Enter an amount greater than zero.</p>}

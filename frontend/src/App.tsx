@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
+  createCategory,
   createExpense,
+  deleteCategory,
+  renameCategory,
+  deleteExpense,
   getCategories,
+  getCategoryList,
   getMonthlySummary,
   getSettings,
   getSummary,
@@ -11,7 +16,9 @@ import {
   parseExpense,
   setBaseCurrency,
   updateExpense,
+  type Category,
   type CategoryBreakdown,
+  type DeleteMode,
   type Expense,
   type ExpensePatch,
   type MonthlySummary as MonthlySummaryResponse,
@@ -23,6 +30,7 @@ import {
 import { formatMoney } from "./format";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
+import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie } from "./components/CategoryPie";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
@@ -30,7 +38,23 @@ import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
 import { TrendChart } from "./components/TrendChart";
 
-const RECENT_COUNT = 10;
+/**
+ * How many expenses the list asks for.
+ *
+ * The whole list, in one request, up to what the API will return. A hundred rows
+ * is nothing to fetch or draw, and the list scrolls inside a fixed box rather
+ * than growing the page — so there is no reason to page it, and paging would
+ * mean a scroll listener, a loading state and an off-by-one to save work that is
+ * already free. Above this the header says "showing 200 of N" and stays honest.
+ */
+const EXPENSE_LIMIT = 200;
+
+/**
+ * Mirrors the backend constant. It is one word for a category that cannot be
+ * renamed or removed, and the alternative is another field on the settings
+ * response for something that will never change.
+ */
+const UNCATEGORISED = "Uncategorised";
 
 export default function App() {
   const [sentence, setSentence] = useState("");
@@ -93,6 +117,17 @@ export default function App() {
   const [conversionEnabled, setConversionEnabled] = useState(false);
 
   /**
+   * The categories that exist, refetched with everything else.
+   *
+   * They live at page level because three places need them at once: the add
+   * box, the editor inside a row, and the list that deletes them. Fetching them
+   * in each would mean three copies that disagree the moment one changes.
+   */
+  const [categoryList, setCategoryList] = useState<Category[]>([]);
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  /**
    * Which row is being edited, if any.
    *
    * An id rather than a boolean, so only one row can be open at a time. Two
@@ -114,13 +149,16 @@ export default function App() {
    */
   const refresh = useCallback(async () => {
     try {
-      const [list, nextSummary, nextCategories, nextTrend, settings] = await Promise.all([
-        listExpenses(RECENT_COUNT),
-        getSummary(),
-        getCategories(),
-        getTrend(),
-        getSettings(),
-      ]);
+      const [list, nextSummary, nextCategories, nextTrend, settings, allCategories] =
+        await Promise.all([
+            listExpenses(EXPENSE_LIMIT),
+          getSummary(),
+          getCategories(),
+          getTrend(),
+          getSettings(),
+          getCategoryList(),
+        ]);
+      setCategoryList(allCategories.categories);
       setCurrency(settings.baseCurrency);
       setCurrencyChosen(settings.baseCurrencyChosen);
       setCurrencies(settings.currencies);
@@ -226,6 +264,79 @@ export default function App() {
       );
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  async function handleAddCategory(name: string) {
+    setCategoryBusy(true);
+    setCategoryError(null);
+
+    try {
+      await createCategory(name);
+      // Only the category list changed, but refreshing everything is one request
+      // more and keeps a single path for "the data moved".
+      await refresh();
+    } catch (caught) {
+      setCategoryError(
+        caught instanceof ApiError ? caught.message : "Could not add that category",
+      );
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  /**
+   * Rename a category and every expense filed under it.
+   *
+   * The expenses are the reason this refreshes the whole page rather than just
+   * the list: they store the category as text, so a rename rewrites rows that
+   * the charts, the pie legend and the recent list are all drawing from.
+   */
+  async function handleRenameCategory(name: string, to: string) {
+    setCategoryBusy(true);
+    setCategoryError(null);
+
+    try {
+      await renameCategory(name, to);
+      setMonthly(null);
+      await refresh();
+    } catch (caught) {
+      setCategoryError(
+        caught instanceof ApiError ? caught.message : "Could not rename that category",
+      );
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function handleDeleteCategory(name: string, mode: DeleteMode) {
+    setCategoryBusy(true);
+    setCategoryError(null);
+
+    try {
+      await deleteCategory(name, mode);
+      // Deleting with "delete" removes expenses, and even "reassign" moves them
+      // between slices of the pie. Everything on the page is stale either way.
+      setMonthly(null);
+      await refresh();
+    } catch (caught) {
+      setCategoryError(
+        caught instanceof ApiError ? caught.message : "Could not delete that category",
+      );
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function handleDeleteExpense(id: string) {
+    setError(null);
+
+    try {
+      await deleteExpense(id);
+      setMonthly(null);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Could not delete that expense");
     }
   }
 
@@ -352,6 +463,7 @@ export default function App() {
               provider={review.provider}
               saving={saving}
               showCurrency={conversionEnabled}
+              categories={categoryList.map((category) => category.name)}
               onSave={handleSave}
               onCancel={handleDiscard}
             />
@@ -396,6 +508,18 @@ export default function App() {
               onEdit={handleEdit}
               onCancelEdit={handleCancelEdit}
               onSaveEdit={handleSaveEdit}
+              categories={categoryList.map((category) => category.name)}
+              onDelete={handleDeleteExpense}
+            />
+
+            <CategoryManager
+              categories={categoryList}
+              uncategorised={UNCATEGORISED}
+              busy={categoryBusy}
+              error={categoryError}
+              onAdd={handleAddCategory}
+              onRename={handleRenameCategory}
+              onDelete={handleDeleteCategory}
             />
           </>
         )}

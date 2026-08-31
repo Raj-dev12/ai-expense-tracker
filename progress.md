@@ -96,8 +96,24 @@ Asked for after the build plan was written, and built on request rather than sug
 - [x] `GET /api/categories` reads the categories table, which the seed had been writing and
       nothing had ever read
 - [x] MCP tools hold no category list of their own: read fresh on every call, matched
-      case-insensitively, and an unknown one is answered with the list that does exist. The
-      backend Zod enum is still what enforces it
+      case-insensitively, and an unknown one is answered with the list that does exist
+- [x] `build-plan.md` updated first: categories are no longer a fixed list of nine, and the
+      interface can delete expenses and add or remove categories
+- [x] `POST` and `DELETE /api/categories`; `createExpenseSchema` validates against the table
+      instead of the `CATEGORY_NAMES` enum, so the enum stops blocking new categories
+- [x] "Type a new category" in the category box; a Categories panel that deletes one, showing
+      how many expenses it holds and offering reassign-or-delete; a delete button on each
+      expense with a confirmation naming what goes
+- [x] `Uncategorised` is a real category, seeded and migrated in, and cannot be deleted
+- [x] Fixed: the browser sent `Content-Type: application/json` on DELETE requests that have
+      no body, which Fastify refuses — the same bug fixed in the MCP client in hour 4, back
+      again because they are two applications with two clients. Four checks now inspect the
+      request that goes out, so a third recurrence fails the build
+- [x] All category management in one panel — add, rename, delete — and the dropdown on an
+      expense only chooses. Renaming rewrites every expense holding the old name, in one
+      transaction, with the count shown first
+- [x] The expense list shows all of them in one request, scrolling inside a fixed height
+      rather than growing the page
 
 ## Finishing
 

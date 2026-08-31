@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { CATEGORY_NAMES } from "../lib/categories.js";
 import { ISO_CURRENCIES } from "../fx/rates.js";
 import { addDays, todayIso } from "../lib/dates.js";
 
@@ -60,7 +59,18 @@ export const currencySchema = z
     message: "Not a currency code ISO 4217 recognises",
   });
 
-export const categorySchema = z.enum(CATEGORY_NAMES);
+/**
+ * A category is now a shape check, not a membership check.
+ *
+ * It used to be `z.enum(CATEGORY_NAMES)`, and that enum was the reason a
+ * category could never be added: the list it validated against was compiled in.
+ * Whether a name actually exists is a question for the `categories` table, asked
+ * by `resolveCategory` in the route — a database read, which a synchronous Zod
+ * schema is the wrong place for.
+ *
+ * The rule did not get weaker. It moved.
+ */
+export const categorySchema = z.string().trim().min(1, "Pick a category").max(40);
 
 /**
  * `source` records where a row came from. The caller declares it, which is fine

@@ -73,7 +73,9 @@ export const summarySchema = z.object({
 
 export const deletedSchema = z.object({ deleted: expenseSchema });
 
-export const categoriesSchema = z.object({ categories: z.array(z.string()) });
+export const categoriesSchema = z.object({
+  categories: z.array(z.object({ name: z.string(), expenseCount: z.number() })),
+});
 
 export const settingsSchema = z.object({
   baseCurrency: z.string(),
@@ -196,7 +198,8 @@ export async function baseCurrency(): Promise<string> {
  * tool is already making.
  */
 export async function currentCategories(): Promise<string[]> {
-  return (await call("/api/categories", categoriesSchema)).categories;
+  const { categories } = await call("/api/categories", categoriesSchema);
+  return categories.map((category) => category.name);
 }
 
 /**

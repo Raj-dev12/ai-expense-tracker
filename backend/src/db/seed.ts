@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { env } from "../env.js";
 import { addDays, todayIso } from "../lib/dates.js";
 import type { CategoryName } from "../lib/categories.js";
-import { CATEGORY_NAMES } from "../lib/categories.js";
+import { SEED_CATEGORY_NAMES } from "../lib/categories.js";
 import { toMoneyString } from "../lib/money.js";
 import { DEMO_USER_EMAIL } from "../lib/user.js";
 import { closeDb, db } from "./client.js";
@@ -193,7 +193,7 @@ async function main() {
   );
 
   console.log("Inserting the nine categories...");
-  await db.insert(categories).values(CATEGORY_NAMES.map((name) => ({ name })));
+  await db.insert(categories).values(SEED_CATEGORY_NAMES.map((name) => ({ name })));
 
   console.log("Inserting the demo user...");
   const [user] = await db

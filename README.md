@@ -20,12 +20,12 @@ an AI parser, which returns a *suggestion*: an amount, a currency, a merchant, a
 a date. The page shows that suggestion as editable chips so you can correct anything it got
 wrong, and only when you press confirm does the browser call the ordinary, validated endpoint
 that writes a row. Below the box, a dashboard shows the month's total against the same
-stretch of last month, a pie of where the money went, a fourteen-week trend line, and the
-most recent expenses. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
+stretch of last month, a pie of where the money went, a fourteen-week trend line, and every
+expense in a list that scrolls inside its own box. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
 and every amount is shown in it; changing it later moves no stored number. A
 button asks the AI to describe the month in a sentence or two, and the card underneath it says
-which parser actually wrote that sentence. Any row in the list can be corrected in place,
-using the same chips the confirm step uses. An MCP server lets an outside AI assistant query
+which parser actually wrote that sentence. Any row in the list can be corrected in place or deleted,
+using the same chips the confirm step uses, and categories can be added and removed. An MCP server lets an outside AI assistant query
 the same data, add expenses and correct them, through the same API a browser uses.
 
 ## Architecture
@@ -179,6 +179,45 @@ Why off by default: conversion made the base currency load-bearing. Changing it 
 rewrite stored figures, which made switching lossy and irreversible. Off, the base is a label,
 and a label can be changed as often as you like.
 
+## Categories are editable
+
+They started as a fixed list of nine enforced by a Zod enum, which meant a category could
+never be added — the list was compiled in. `build-plan.md` records the change; the
+`categories` table is the source of truth now, and the enum is gone.
+
+- **Add, rename and remove** them in the Categories panel, which shows how many expenses
+  each one holds. The category dropdown on an expense only *chooses* — one control, one job.
+- **Renaming rewrites the expenses too.** An expense stores its category as text rather than
+  a foreign key, so there is no cascade to rely on; the rename and the rewrite happen in one
+  transaction, and the panel says how many expenses it will touch before you confirm.
+- **Delete an expense** from its row in the list, after a confirmation that repeats
+  the expense back — amount, merchant, date and category — because the wrong Delete is one
+  pixel from the right one.
+
+### Deleting a category that has expenses in it
+
+The panel says how many, and offers two answers:
+
+| Choice | What happens |
+|---|---|
+| Move to Uncategorised | The expenses stay; only the label goes. |
+| Delete them too | The expenses are removed with it. Not undoable. |
+
+There is no default and no third "just do something sensible" option, because both guesses
+are bad: one destroys expenses over a tidied label, the other keeps rows somebody meant to
+clear out. The API refuses a delete that does not say which — `?expenses=` is required.
+
+`Uncategorised` is a real category rather than an empty value, so charts, filters and totals
+need no special case for "no category". It is the one category that cannot be deleted: it is
+where the others send their expenses.
+
+### The enum did not get weaker, it moved
+
+Validation used to be `z.enum(CATEGORY_NAMES)` inside `createExpenseSchema`. It is now a
+lookup against the table, in the route — a database read, which a synchronous Zod schema is
+the wrong place for. The 400 it returns has the same shape, so a caller cannot tell which
+kind of check refused it, and does not need to.
+
 ## The MCP server runs locally, not in compose
 
 An MCP server exposes tools to an AI assistant. This one has seven: `add_expense`,
@@ -236,7 +275,10 @@ DELETE /api/expenses/:id
 GET    /api/analytics/summary   month to date, vs the same days last month
 GET    /api/analytics/categories
 GET    /api/analytics/trend     weekly buckets
-GET    /api/categories          the categories that currently exist
+GET    /api/categories          the categories, with how many expenses each holds
+POST   /api/categories          add one
+PATCH  /api/categories/:name    rename it, and every expense filed under it
+DELETE /api/categories/:name    remove one; ?expenses=reassign or ?expenses=delete
 GET    /api/settings            the currency, whether it was chosen, and the ISO list
 PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
@@ -255,8 +297,6 @@ one that admits the gaps.
 - **It is not deployed yet.** Everything above runs under `docker compose` on a laptop, and
   that has been tested from an empty database. The VPS, the sslip.io address and the HTTPS
   padlock are the remaining half of the deployment work and have not been done.
-- **There is no delete button in the interface.** `DELETE /api/expenses/:id` exists and the
-  MCP server's `delete_expense` uses it, but the page has no control for it.
 - **There is no login.** One demo user, created by the seed script, looked up on every
   request. `user_id` is never read from a request body, so adding real authentication later
   changes one function rather than every query.

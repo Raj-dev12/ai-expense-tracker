@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getParser } from "../ai/index.js";
 import { isConversionEnabled } from "../fx/rates.js";
+import { categoryNames } from "../lib/category-store.js";
+import { UNCATEGORISED } from "../lib/categories.js";
 import { monthLabel, todayIso } from "../lib/dates.js";
 import { categoryTotalsBetween, monthToDate } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
@@ -27,6 +29,7 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/ai/parse-expense", async (request) => {
     const input = validate(parseExpenseRequestSchema, request.body, "sentence");
     const { baseCurrency } = await getDemoUser();
+    const available = await categoryNames();
     const parser = getParser();
 
     const result = await parser.parseExpense({
@@ -50,16 +53,24 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
       // Who actually answered, which on a fallback is the mock rather than the
       // provider named in the configuration.
       provider: checked.data.producedBy,
-      // The suggestion is shown to a person who then confirms it, so it has to
-      // describe what will actually be stored. With conversion off that is the
-      // base currency whatever the sentence said — the parser can go on reading
-      // "quid" out of a sentence, but nothing downstream will act on it.
       // Stated explicitly, because it is the promise this endpoint makes.
       saved: false,
       confidence: checked.data.confidence,
-      suggestion: isConversionEnabled()
-        ? checked.data.suggestion
-        : { ...checked.data.suggestion, currency: baseCurrency },
+      // The suggestion is shown to a person who then confirms it, so it has to
+      // describe what will actually be stored rather than what the sentence said.
+      suggestion: {
+        ...checked.data.suggestion,
+        // The parsers guess from a fixed vocabulary of words; the categories are
+        // editable. A guess of "Travel" after somebody deleted Travel would be a
+        // suggestion the confirm step could not save, so it falls back to
+        // Uncategorised — still editable, and still nothing is stored either way.
+        category: available.includes(checked.data.suggestion.category)
+          ? checked.data.suggestion.category
+          : UNCATEGORISED,
+        // With conversion off there is one currency and it is the base, whatever
+        // the sentence said.
+        currency: isConversionEnabled() ? checked.data.suggestion.currency : baseCurrency,
+      },
     };
   });
 

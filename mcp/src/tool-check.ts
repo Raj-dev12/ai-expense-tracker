@@ -184,9 +184,10 @@ check("rows added through MCP are marked as such", findable.body.includes("Tool 
 
 // --- categories are read fresh, and the backend still enforces ---------------
 const BACKEND = process.env.BACKEND_URL ?? "http://localhost:3000";
-const liveCategories = (await (await fetch(`${BACKEND}/api/categories`)).json()) as {
-  categories: string[];
+const liveCategoriesBody = (await (await fetch(`${BACKEND}/api/categories`)).json()) as {
+  categories: Array<{ name: string; expenseCount: number }>;
 };
+const liveCategories = { categories: liveCategoriesBody.categories.map((c) => c.name) };
 check(
   "the server publishes its current categories",
   Array.isArray(liveCategories.categories) && liveCategories.categories.length > 0,

@@ -1024,6 +1024,22 @@ want when someone asks you about the project in six months.
 | The tool guides; the schema enforces | An unknown category is answered with the real list, and refused again by Zod | Two different jobs. The MCP check exists so an assistant gets a *useful* failure it can act on; the backend enum exists so nothing can get past it. Removing the first would make the assistant guess; removing the second would let it succeed. Proved by posting an invented category straight to the API with the tool bypassed, and getting a 400. |
 | Category matching is case-insensitive | "groceries" resolves to "Groceries" | It is obviously the same choice, and refusing it would be pedantry rather than validation. The stored spelling is what gets sent on, so the API only ever sees a name it knows. |
 | The category argument is a string, not an enum | Validated at call time instead of in the tool schema | An MCP tool schema is registered once at startup, so an enum in it is a snapshot — exactly the cached copy this change removes. A string plus a live check is the only shape that can stay current. |
+| Categories stopped being a fixed list — **the plan changed first** | `build-plan.md` and its decisions table were edited before any code | The plan said "fixed list of nine" and CLAUDE.md says to build only what the plan contains. Writing the feature against a document that forbids it would leave the next reader unable to tell a deliberate change from a mistake. Changing the specification is part of changing the behaviour. |
+| The Zod enum moved rather than weakened | `resolveCategory` reads the table; the schema keeps a shape check | `z.enum(CATEGORY_NAMES)` was the exact thing making a new category unusable. Existence is a database question, and a synchronous schema is the wrong place for a query, so the check lives in the route and returns the identical 400 shape. A caller cannot tell which kind of check refused it, and does not need to. |
+| `Uncategorised` is a real row | Seeded, migrated into existing databases, and undeletable | A null or an empty string would mean every chart, filter, total and group-by needs a special case for "no category", forever, for one edge. A row needs none. It cannot be deleted because it is where a deleted category sends its expenses — removing it would leave a delete with nowhere to go. |
+| Deleting a category demands an answer | `?expenses=reassign` or `?expenses=delete`, no default | Both guesses are bad. Assuming delete destroys expenses because somebody tidied a label; assuming reassign quietly keeps rows that were meant to be cleared. The count is shown first, because "Delete Groceries?" and "Delete Groceries and the 28 expenses in it?" are different questions and only one is honest. |
+| Creating a category that exists is not an error | `POST /api/categories` returns the existing name | The box is "type a new category", and typing a name that happens to be taken still ends up exactly where the person wanted. Case-insensitive, so "groceries" selects Groceries rather than making a second one. |
+| Adding happens where categories are used; deleting happens in a panel | The dropdown creates, the Categories section removes | Needing a new category is discovered mid-expense, so making one must not mean going elsewhere and losing the form. Deleting is a decision about the whole list, needs the counts, and needs room to ask a question — which is not something to do from a dropdown. |
+| Deleting an expense repeats it back | Amount, merchant, date and category in the confirmation | A row is one line among ten and the wrong Delete is a pixel from the right one. "Are you sure?" tests whether you meant to click; naming the expense tests whether you clicked the one you meant. |
+| A category that no longer exists still shows in the editor | The select prepends the row's own value when it is missing from the list | The category can be deleted while a form is open. Silently switching to something else would change an expense underneath the person editing it; showing it and letting the save be refused is the honest failure. |
+| The parse endpoint falls back to Uncategorised | When a parser guesses a category that has been deleted | The parsers guess from a fixed vocabulary of keywords, but the categories are editable, so a guess of "Travel" after Travel was deleted would be a suggestion the confirm step could not save. Nothing is stored either way; the person just gets a starting point they can change. |
+| Content-Type only when there is a body | Both HTTP clients guard it, and the frontend has a check that fails if the guard goes | Fastify refuses a request that announces JSON and sends none, so a DELETE carrying the header is a 400 before it reaches a route. This was fixed in the MCP client in hour 4 and came back in the browser, because they are two applications with two clients. The comment in the first one protected nothing in the second — a comment protects the code it sits in; only a check protects code somewhere else. |
+| Categories are managed in one panel; the dropdown only chooses | Add, rename and delete live together; `CategorySelect` is gone | Choosing a category and maintaining the list of categories are different jobs, and a dropdown that sometimes turns into a text box is one you have to read before using. The cost — making a category mid-expense means going to the panel — buys a control that does one thing, and removed a prop threaded through four components. |
+| Renaming rewrites the expenses, in one transaction | `db.transaction` around the category row and every expense holding the old name | An expense stores its category as text rather than a foreign key, decided in hour 1 because the Zod enum already rejected anything outside the list. The bill comes due here: there is no cascade. Half of this is worse than none — a renamed row with the old text still in the expenses leaves them pointing at a name that does not exist, invisible to the filter and uneditable. |
+| The rename shows its count first | The same shape as the delete flow | "Rename Groceries" and "rename Groceries and rewrite the 28 expenses in it" are the same click and different facts. |
+| A rename onto an existing name is refused, not merged | "A category called Groceries already exists" | Merging is a different feature with its own questions — what happens to the counts, whether it can be undone — and guessing at one of those answers is worse than declining. A case-only rename is still allowed, because that is the same row. |
+| Uncategorised cannot be renamed either | Alongside the existing rule that it cannot be deleted | The delete flow moves expenses there *by name*, and the parse endpoint falls back to it by name. Renaming it would break both, silently, at the moment somebody next deleted a category. |
+| The expense list loads everything in one request | `limit=200`, scrolling inside a fixed height | A hundred rows is nothing to fetch or draw, and paging would add a scroll listener, a loading state and an off-by-one to save work that is already free. The fixed height is the load-bearing part: an unbounded list pushes the charts and the categories panel off the bottom of the page. The header still says "showing 200 of 500" when the cap bites, because a list that quietly dropped rows would be worse than one that admits it. |
 
 ---
 
@@ -2280,3 +2296,219 @@ Nine tool checks, including the round trip through the real protocol: the endpoi
 nine names, an invalid category is refused with all nine listed in the message, a lowercase
 name is accepted, and the backend still returns 400 with the tool bypassed. All seven tools
 work over stdio. 67 backend tests, three typechecks, all render checks.
+
+### Session 20 — categories become editable, and things can be deleted
+
+**The plan came first**
+
+The build plan said the categories were a *fixed list of nine*, and CLAUDE.md says to build
+only what the plan contains. That is why this was flagged last time rather than built.
+
+So the plan changed first: the categories table is now described as the source of truth,
+`Uncategorised` is named in it, and the locked-decisions table gained two rows — one for
+editable categories, one for deletion. Only then the code. **Changing behaviour that a
+specification forbids means changing the specification**, otherwise the next reader cannot
+tell a deliberate decision from a mistake.
+
+**The enum was the thing in the way**
+
+`createExpenseSchema` validated with `z.enum(CATEGORY_NAMES)`. Every other piece of this
+could have been built and a new category still would not have been storable, because the list
+it checked against was compiled in.
+
+It is now a lookup against the table, in the route rather than in the schema. Existence is a
+database question, and `validate()` is synchronous on purpose — threading a connection into
+schema parsing would hide a query somewhere nobody expects one. The 400 it throws carries the
+same `{ field, message }` shape a Zod failure does, so nothing downstream can tell them apart.
+
+The rule did not get weaker. It moved.
+
+**Uncategorised is a row, not a null**
+
+The alternative was an empty category, and an empty category means a special case in every
+chart, every filter, every total and every group-by, forever, for one edge. A real row needs
+none of that: it sorts, counts, colours and filters like any other.
+
+It cannot be deleted, and the interface says why rather than just hiding the button — a
+missing control invites a hunt, a stated reason closes the question.
+
+**Two answers, no default**
+
+Deleting a category that has expenses in it asks what should happen to them, showing the
+count first. Both possible defaults are wrong: assuming *delete* destroys expenses because
+somebody tidied a label; assuming *reassign* quietly keeps rows that were meant to go. The
+API requires `?expenses=` and refuses without it, so the choice cannot be skipped by going
+around the interface.
+
+**Where each action lives**
+
+Adding a category happens *in the dropdown*, because needing one is discovered mid-expense
+and making one must not mean abandoning a half-filled form. Deleting happens in a panel,
+because it is a decision about the whole list, it needs the counts, and it needs room to ask
+a question.
+
+**Three places that still held the old assumption**
+
+The main change was the endpoint and the schema. Three other things quietly assumed a fixed
+list, and each would have been a real bug:
+
+- the frontend kept its own copy of the nine names to build the dropdown — now the live list
+- the parse endpoint could suggest a category that had been deleted — now falls back to
+  Uncategorised, since nothing is stored at that point anyway
+- an editor open on a row whose category was deleted meanwhile would have silently switched
+  it to something else — now it shows the missing category and lets the save be refused
+
+**A cleanup the checks caught, about themselves**
+
+The MCP tool check crashed midway on an earlier run — after creating its two test rows and
+before its cleanup — and left them behind. The next run then failed its final "the test rows
+are gone again" check, correctly, and about the *previous* run rather than itself. Worth
+remembering: **a check script that creates data needs a cleanup that survives its own
+failure**, and this one does not yet. The rows were removed by hand.
+
+**Verified**
+
+Create a category, file an expense under it, delete it with `reassign` and watch the expense
+land in Uncategorised; repeat with `delete` and watch the expense go with it. Uncategorised
+refuses to be deleted, an unknown category is refused, and a delete that does not say what to
+do with the expenses is refused. 67 backend tests, three typechecks, all render checks
+including eleven new ones, all seven MCP tools over stdio. 95 rows before and after.
+
+### Session 21 — the same bug, twice, in two applications
+
+**The bug**
+
+Deleting an expense or a category from the browser returned:
+
+```
+Body cannot be empty when content-type is set to 'application/json'
+```
+
+Fastify refuses a request that announces a JSON body and then sends none. The frontend's
+request helper set `Content-Type: application/json` on every call, so every DELETE — which
+has no body — was a 400 before it reached a route.
+
+Reproduced directly before touching anything, which is the only way to be sure the fix is
+the fix:
+
+```
+DELETE /api/expenses/:id  with the header     400
+DELETE /api/expenses/:id  without the header  200
+```
+
+**It was fixed once already**
+
+This exact bug was found and fixed in the MCP server's HTTP client in hour 4, and the comment
+explaining it is still sitting there. It came back because the browser and the MCP server are
+two separate applications that each build their own requests. Fixing one taught the other
+nothing.
+
+**The question that was worth asking, and its answer**
+
+The obvious diagnosis is "the frontend must be setting headers in lots of places". It is not:
+`api.ts` has exactly one `fetch` call, in one `request()` helper, and every one of the
+thirteen API functions goes through it. That is why the fix is a single line.
+
+So the duplication is not *within* the frontend, it is *between* the frontend and the MCP
+server — two applications, in two folders, with two clients. Sharing one would mean a shared
+package, which this project already decided against for the category list, for the same
+reason: a package between two small applications is a lot of machinery, and the honest
+alternative is to make the duplicate fail loudly instead.
+
+**So the guard is a check, not a refactor**
+
+Four assertions now stub `fetch` and inspect the request that goes out:
+
+- a DELETE of an expense sends no `Content-Type`
+- a DELETE of a category sends no `Content-Type`
+- the category delete carries its choice in the query string and has no body — asserted
+  because moving that choice into a body would quietly bring the header back
+- a POST *with* a body still announces JSON, so the fix cannot be "remove the header"
+
+They test the request rather than the response, which is unusual and is the point: the reply
+never arrived, so the bug lived entirely in what was sent.
+
+**The lesson worth keeping**
+
+The MCP client's fix carried a comment explaining the trap. It did not help, because the
+person writing the frontend client was never going to read a file in another application.
+**A comment protects the code it sits in; only a check protects code somewhere else.**
+
+**Verified**
+
+Both deletes return 200 through Caddy with the requests shaped exactly as the browser now
+sends them. The compiled bundle carries the guard. 67 backend tests, three typechecks, all
+render checks including the four new ones, all seven MCP tools over stdio.
+
+### Session 22 — one panel for categories, and the whole list on screen
+
+**The dropdown was doing two jobs**
+
+Adding a category lived in the category dropdown, as a final option that turned the control
+into a text box. It worked, and it meant a dropdown you had to read before using: choosing a
+category and maintaining the list of categories are different jobs sharing one control.
+
+They are separated now. The dropdown chooses. The Categories panel adds, renames and deletes.
+The cost is real — making a category mid-expense means going to the panel first — and it buys
+a control that does one thing. `CategorySelect.tsx` was deleted, and with it the
+`onCreateCategory` prop that had been threaded through four components to reach the box.
+
+**Renaming is where the hour-1 decision came due**
+
+An expense stores its category as *text*, not a foreign key. That was decided in hour 1 for a
+good reason — the Zod enum already rejected anything outside the list, so a foreign key would
+have been a second lock on the same door — and the decisions table still records it.
+
+The bill arrives here. There is no cascade, so renaming a category has to rewrite every
+expense holding the old name, and the two writes are one transaction:
+
+```ts
+return db.transaction(async (tx) => {
+  await tx.update(categories).set({ name: next })...
+  const moved = await tx.update(expenses).set({ category: next })...
+  return { from: current, to: next, expensesUpdated: moved.length };
+});
+```
+
+Half of this would be worse than none of it. A renamed category row with the expenses still
+holding the old text would leave every one of them pointing at a name that no longer exists —
+invisible to the category filter, and uneditable without knowing what had happened. Either
+both land or neither does.
+
+The panel shows the count before doing it, the same way the delete flow does, because
+"rename Groceries" and "rename Groceries and rewrite the 28 expenses in it" are the same
+click and different facts.
+
+**Three rules the rename needed that the create did not**
+
+- **Uncategorised cannot be renamed.** The delete flow moves expenses there *by name*, and
+  the parse endpoint falls back to it by name. Renaming it would break both silently.
+- **A clash is refused, not merged.** Renaming Coffee to Groceries could reasonably mean
+  "merge these two", and that is a different feature with its own questions — chiefly what
+  happens to the counts and whether it can be undone. Guessing at it would be worse than
+  refusing.
+- **Changing only the capitalisation is allowed.** `Coffee` → `coffee` is the same row, so
+  the clash check compares case-insensitively but exempts the row being renamed.
+
+**The list stopped hiding 87 of its rows**
+
+It showed ten of ninety-seven. Now it fetches all of them in one request and scrolls inside a
+fixed-height box.
+
+One request, not paging, because a hundred rows is nothing to fetch and nothing to draw —
+paging it would add a scroll listener, a loading state and an off-by-one to save work that is
+already free. The fixed height is the part that matters: an unbounded list pushes the charts
+and the categories panel off the bottom of the page, so the box keeps its size and the rows
+move inside it.
+
+The header still degrades honestly. It says "97 expenses" when it holds everything and
+"showing 200 of 500" when it does not, because the API caps a page at 200 and a list that
+quietly dropped rows would be worse than one that admits it.
+
+**Verified**
+
+Renamed Health to Wellbeing against real data: four expenses rewritten, the old name gone,
+the filter following. Renamed it back. A clash, an attempt on Uncategorised, and an empty
+name are each refused with their own message; a case-only rename is allowed. The list returns
+97 of 97 in one request. 67 backend tests, three typechecks, all render checks including eight
+new or rewritten ones, all seven MCP tools over stdio.

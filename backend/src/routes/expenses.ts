@@ -2,6 +2,7 @@ import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses, type ExpenseRow } from "../db/schema.js";
+import { resolveCategory } from "../lib/category-store.js";
 import { storedAmountFor } from "../lib/figures.js";
 import { HttpError } from "../lib/http-error.js";
 import { toMoneyString } from "../lib/money.js";
@@ -64,6 +65,11 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
       throw new HttpError(429, "This demo has reached its expense limit");
     }
 
+    // The category has to exist. This is the check that replaced the Zod enum:
+    // a database read rather than a compiled-in list, which is what makes a
+    // category added a minute ago usable now.
+    const category = await resolveCategory(input.category);
+
     // With conversion off this simply stores what was typed, in the base
     // currency. With it on, the amount is converted at the rate from the day it
     // was spent. Either way the decision lives in one function.
@@ -82,7 +88,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
         currency: stored.currency,
         amountBase: stored.amountBase,
         merchant: input.merchant ?? null,
-        category: input.category,
+        category,
         description: input.description ?? null,
         expenseDate: input.expenseDate,
         source: input.source,
@@ -101,7 +107,10 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     const filters = [eq(expenses.userId, userId)];
     if (query.from) filters.push(gte(expenses.expenseDate, query.from));
     if (query.to) filters.push(lte(expenses.expenseDate, query.to));
-    if (query.category) filters.push(eq(expenses.category, query.category));
+    // Resolved rather than trusted, so a filter naming a category that does not
+    // exist says so instead of quietly returning nothing — which reads as "you
+    // spent nothing on that" rather than "there is no such category".
+    if (query.category) filters.push(eq(expenses.category, await resolveCategory(query.category)));
     if (query.search) {
       // % and _ are wildcards in a LIKE pattern, so a search for "50%" would
       // otherwise match far more than the person asked for. A backslash is
@@ -184,7 +193,7 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
 
     if (patch.amount !== undefined) changes.amount = toMoneyString(patch.amount);
     if (patch.currency !== undefined) changes.currency = patch.currency;
-    if (patch.category !== undefined) changes.category = patch.category;
+    if (patch.category !== undefined) changes.category = await resolveCategory(patch.category);
     if (patch.expenseDate !== undefined) changes.expenseDate = patch.expenseDate;
     // `in` rather than `!== undefined`, because null is a real value here: it
     // means the person cleared the field, and that has to be told apart from
