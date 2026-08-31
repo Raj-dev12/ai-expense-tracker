@@ -22,12 +22,12 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 - [x] `ExpenseParser` interface defined
 - [x] Mock parser works with no network access
-- [ ] Claude adapter using structured output
-- [ ] OpenAI adapter using structured output
+- [x] Claude adapter using structured output
+- [x] OpenAI adapter using structured output
 - [x] Provider chosen by environment variable, defaults to mock
 - [x] Parser output validated with Zod before it leaves the backend
-- [~] Falls back to mock when a real provider fails — falls back when an adapter is missing;
-      the error and timeout paths arrive with the adapters themselves
+- [x] Falls back to mock when a real provider fails — errors, timeouts, a missing key,
+      and replies that fail validation all end up on the mock
 - [x] `POST /api/ai/parse-expense` returns a suggestion and saves nothing
 
 ## Hour 3 — the frontend

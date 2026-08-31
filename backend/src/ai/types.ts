@@ -23,6 +23,12 @@ export type ParseResult = {
   suggestion: ExpenseSuggestion;
   /** 0 to 1. Never 1 — the whole design assumes the parser can be wrong. */
   confidence: number;
+  /**
+   * Which parser actually produced this, which is not always the one that was
+   * configured: a provider that fails is answered by the mock instead. Reporting
+   * the configured name here would be a small lie told on every fallback.
+   */
+  producedBy: AiProviderName;
 };
 
 export type ParseRequest = {

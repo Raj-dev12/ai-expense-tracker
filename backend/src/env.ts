@@ -18,6 +18,26 @@ const envSchema = z.object({
   // Which AI adapter to use. Defaults to the offline mock so the app runs
   // fully with no API key set anywhere.
   AI_PROVIDER: z.enum(["mock", "claude", "openai"]).default("mock"),
+
+  // Keys are optional, because the app must run without them. An entry left
+  // blank in .env arrives as an empty string rather than as nothing at all, so
+  // it is turned back into "not set" here — otherwise an empty key would be
+  // handed to an SDK and fail confusingly on the first request instead of
+  // falling back to the mock.
+  ANTHROPIC_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value?.trim() ? value.trim() : undefined)),
+  OPENAI_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value?.trim() ? value.trim() : undefined)),
+
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-5"),
+  OPENAI_MODEL: z.string().min(1).default("gpt-5"),
+
+  // How long to wait on a provider before giving up and using the mock.
+  AI_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 });
 
 const result = envSchema.safeParse(process.env);

@@ -445,6 +445,33 @@ than assumed. Ours is a simple tally: points for finding an amount, a currency s
 category keyword, a shop name and a date phrase. It is deliberately capped below 1, because a
 parser that can claim certainty invites people to stop reading the confirmation step.
 
+**SDK (Software Development Kit)**
+A library published by a service so you do not have to build its HTTP requests by hand. We
+use Anthropic's and OpenAI's rather than writing the calls ourselves, mainly for their
+structured-output helpers.
+
+**Structured output**
+Handing the model a JSON schema it is required to fill in, instead of asking politely for
+JSON and hoping. Both SDKs generate that schema from the same Zod schema we validate with.
+It removes the classic failure — prose, or JSON wrapped in a code fence — but not the
+interesting ones: a model can still return a real-looking date in the future, so the reply is
+validated again on arrival.
+
+**Fallback**
+A worse answer that still works, used when the better one is unavailable. Ours catches
+everything on the far side of the network — provider down, rate limited, key expired, request
+too slow, reply failed validation — and answers with the mock instead. The person notices a
+less accurate guess, not an error.
+
+**Timeout**
+A limit on how long to wait before giving up. Without one, a provider having a bad day becomes
+a page that hangs. Ours is 15 seconds, after which the mock answers.
+
+**Redaction**
+Removing secrets from text before it is stored or displayed. Provider errors sometimes quote
+your key back at you, so the key is stripped from the message before it reaches a log — logs
+end up in screenshots and bug reports far more often than anyone plans for.
+
 ---
 
 ## 8. Terms: MCP
@@ -648,6 +675,10 @@ want when someone asks you about the project in six months.
 | Seed safety | The seed script refuses to run unless `ALLOW_SEED=true` is set | It empties the tables first. The nightly re-seed in production needs that to work on purpose, so the guard has to be a flag someone sets deliberately rather than a guess based on the environment name. |
 | Deletion | Real deletes, no `deleted_at` flag | Soft deletion would put a "and not deleted" condition into every single query for a feature nothing in the plan uses. `source` already records where a row came from, which is the provenance the demo actually needs. |
 | Confidence score | Shown as small muted text next to the interpretation; nothing behaves differently because of it | Gating on a threshold would invent interaction the plan never asked for. The confirm step already handles low confidence — the person reading it is the threshold. |
+| AI SDKs | The official `@anthropic-ai/sdk` and `openai` packages, rather than calling the HTTP APIs with `fetch` | Both give a typed structured-output helper that turns our Zod schema into the JSON schema the model must obey — hand-rolling that for two providers is the part most likely to go quietly wrong. The alternative, plain `fetch`, would have added no dependencies but meant maintaining two request shapes and two error formats by hand. |
+| Claude model | `claude-opus-5`, overridable with `ANTHROPIC_MODEL` | The current default model. Reading one sentence is a small job, so the request also sets effort to low, which keeps it quick and cheap without changing the model. Anyone who wants to trade quality for cost changes one environment variable rather than any code. |
+| Provider failure | Any error, timeout or invalid reply falls back to the mock | A demo that degrades is better than a demo that breaks. The person still sees a suggestion, still corrects it, and still confirms it — the safety pattern is untouched, only the quality of the guess changes. |
+| Reported provider | The response names the parser that actually answered, not the one configured | On a fallback these differ. Reporting the configured provider would mean the API claimed Claude wrote a suggestion the mock produced, which is a small lie told on exactly the occasions when the truth matters most. |
 
 ---
 
@@ -952,3 +983,49 @@ any real provider existed to complicate the picture.
 
 The Claude and OpenAI adapters, both using structured output, both falling back to the mock
 when they error or time out.
+
+### Session 4 — hour 2 finished, the real providers
+
+Added the Claude and OpenAI adapters behind the interface built last session. The mock stays
+the default and nothing about the confirm step changed.
+
+**What got built**
+
+- `claude.ts` and `openai.ts`, both using their SDK's structured-output helper so the model is
+  given a JSON schema generated from the same Zod schema we validate against.
+- One shared prompt and one shared validation function, so the two adapters differ only in
+  which SDK they call.
+- `withMockFallback`, which turns any provider failure into a mock answer.
+- Keys, model names and the timeout all read from the environment. No key is ever hardcoded,
+  and a blank key in `.env` counts as absent rather than being passed to an SDK.
+
+**What it taught us**
+
+- A provider quotes your API key back in its error message. OpenAI's 401 says
+  `Incorrect API key provided: sk-inval*******************only` — masked in the middle, but the
+  ends survive, and we were writing that straight into the log. Now stripped before logging.
+  This was found by deliberately using an invalid key, which is worth doing on purpose.
+- The response was reporting `provider: "claude"` while the mock had actually produced the
+  answer. Technically it named the configured provider; in practice it was a lie told on every
+  fallback. It now reports whichever parser really answered.
+- A JSON schema can demand a string but not a sensible date. Structured output stops a model
+  returning the wrong shape, not the wrong values, so our own validation still does the real
+  work.
+
+**Verified**
+
+- Both adapters reach their provider, get a 401 from a deliberately invalid key, and fall back
+  to the mock. The endpoint still returned a usable suggestion.
+- With no keys set at all, everything still runs on the mock.
+- Nothing was saved by any of it: the expense count stayed at 97 throughout.
+- No key material appears in the server log.
+
+**Not tested**
+
+- A successful call to either provider. That needs a real key, which is yours to add — so the
+  happy path is verified by construction and by the type checker, not by a live request.
+
+**Next**
+
+Hour 3: the frontend. One page, the add box, the interpretation shown as editable chips, and
+the charts.

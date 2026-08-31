@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AI_PROVIDER_NAMES } from "../ai/types.js";
 import { categorySchema, currencySchema, isoDateSchema } from "./expense.js";
 
 /** The body of POST /api/ai/parse-expense. */
@@ -32,6 +33,7 @@ export const expenseSuggestionSchema = z.strictObject({
 export const parseResultSchema = z.strictObject({
   suggestion: expenseSuggestionSchema,
   confidence: z.number().min(0).max(1),
+  producedBy: z.enum(AI_PROVIDER_NAMES),
 });
 
 export type ExpenseSuggestionOutput = z.infer<typeof expenseSuggestionSchema>;

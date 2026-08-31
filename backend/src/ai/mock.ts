@@ -225,6 +225,7 @@ export const mockParser: ExpenseParser = {
         expenseDate: date,
       },
       confidence: Math.min(Math.round(confidence * 100) / 100, 0.95),
+      producedBy: "mock",
     };
   },
 

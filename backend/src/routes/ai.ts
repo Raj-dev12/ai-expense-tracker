@@ -38,7 +38,9 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return {
-      provider: parser.name,
+      // Who actually answered, which on a fallback is the mock rather than the
+      // provider named in the configuration.
+      provider: checked.data.producedBy,
       // Stated explicitly, because it is the promise this endpoint makes.
       saved: false,
       confidence: checked.data.confidence,
