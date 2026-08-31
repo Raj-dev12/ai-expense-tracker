@@ -8,8 +8,10 @@ import {
   getTrend,
   listExpenses,
   parseExpense,
+  updateExpense,
   type CategoryBreakdown,
   type Expense,
+  type ExpensePatch,
   type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
   type ParseResponse,
@@ -63,6 +65,19 @@ export default function App() {
   const [monthly, setMonthly] = useState<MonthlySummaryResponse | null>(null);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [monthlyError, setMonthlyError] = useState<string | null>(null);
+
+  /**
+   * Which row is being edited, if any.
+   *
+   * An id rather than a boolean, so only one row can be open at a time. Two
+   * half-finished edits on screen at once would be two chances to lose changes
+   * by clicking away, for no benefit — nobody is editing two expenses in
+   * parallel. The error lives here too, so it can be shown inside the open row
+   * rather than at the top of the page, away from the thing that failed.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   /**
    * Everything the dashboard shows, refetched together.
@@ -146,6 +161,41 @@ export default function App() {
   function handleDiscard() {
     setReview(null);
     setError(null);
+  }
+
+  function handleEdit(id: string) {
+    setEditingId(id);
+    setEditError(null);
+  }
+
+  function handleCancelEdit() {
+    setEditingId(null);
+    setEditError(null);
+  }
+
+  async function handleSaveEdit(id: string, patch: ExpensePatch) {
+    setSavingEdit(true);
+    setEditError(null);
+
+    try {
+      await updateExpense(id, patch);
+      setEditingId(null);
+      // An edit can move an amount, a date or a category, so the cards, both
+      // charts and the list can all be describing the old figures. The same
+      // refresh the save path uses puts every one of them right at once.
+      setMonthly(null);
+      await refresh();
+    } catch (caught) {
+      // Stays open on failure. Closing the editor would throw away what the
+      // person typed at the exact moment they need it back.
+      setEditError(
+        caught instanceof ApiError
+          ? [caught.message, ...(caught.fields ?? []).map((f) => f.message)].join(" — ")
+          : "Could not save that change",
+      );
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   async function handleSummarise() {
@@ -244,7 +294,16 @@ export default function App() {
               {trend && <TrendChart points={trend.points} />}
             </div>
 
-            <RecentExpenses expenses={recent} total={total} />
+            <RecentExpenses
+              expenses={recent}
+              total={total}
+              editingId={editingId}
+              savingEdit={savingEdit}
+              editError={editError}
+              onEdit={handleEdit}
+              onCancelEdit={handleCancelEdit}
+              onSaveEdit={handleSaveEdit}
+            />
           </>
         )}
       </main>

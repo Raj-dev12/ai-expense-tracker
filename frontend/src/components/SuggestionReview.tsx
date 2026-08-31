@@ -1,12 +1,11 @@
 import { useState } from "react";
+import { type NewExpense, type Suggestion } from "../api";
 import {
-  CATEGORY_NAMES,
-  CURRENCIES,
-  type CategoryName,
-  type NewExpense,
-  type Suggestion,
-} from "../api";
-import { Chip, fieldClass } from "./Chip";
+  ExpenseFields,
+  amountIsUsable,
+  parseAmount,
+  type ExpenseFieldValues,
+} from "./ExpenseFields";
 
 /**
  * The confirm step — the whole reason this project exists.
@@ -14,6 +13,11 @@ import { Chip, fieldClass } from "./Chip";
  * Nothing has been saved at this point. The parser has made some guesses, they
  * are all editable, and only pressing save sends anything to the validated
  * endpoint that writes to the database.
+ *
+ * The fields themselves live in ExpenseFields, shared with the editor on the
+ * recent list. What is particular to this screen is the framing: that these are
+ * guesses, that nothing is stored yet, and that an amount the parser could not
+ * find has to be filled in before saving is possible.
  */
 export function SuggestionReview({
   suggestion,
@@ -30,29 +34,28 @@ export function SuggestionReview({
   onSave: (expense: NewExpense) => void;
   onCancel: () => void;
 }) {
-  // Held as text while being edited, because a half-typed number is not a
-  // number. It is converted once, on save.
-  const [amount, setAmount] = useState(suggestion.amount?.toString() ?? "");
-  const [currency, setCurrency] = useState(suggestion.currency);
-  const [merchant, setMerchant] = useState(suggestion.merchant ?? "");
-  const [category, setCategory] = useState<CategoryName>(suggestion.category);
-  const [expenseDate, setExpenseDate] = useState(suggestion.expenseDate);
-  const [note, setNote] = useState(suggestion.description ?? "");
+  const [values, setValues] = useState<ExpenseFieldValues>({
+    amount: suggestion.amount?.toString() ?? "",
+    currency: suggestion.currency,
+    merchant: suggestion.merchant ?? "",
+    category: suggestion.category,
+    expenseDate: suggestion.expenseDate,
+    note: suggestion.description ?? "",
+  });
 
-  const parsedAmount = Number(amount.replace(",", "."));
-  const amountIsUsable = amount.trim() !== "" && Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const usable = amountIsUsable(values.amount);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!amountIsUsable || saving) return;
+    if (!usable || saving) return;
 
     onSave({
-      amount: parsedAmount,
-      currency,
-      merchant: merchant.trim() || null,
-      category,
-      description: note.trim() || null,
-      expenseDate,
+      amount: parseAmount(values.amount),
+      currency: values.currency,
+      merchant: values.merchant.trim() || null,
+      category: values.category,
+      description: values.note.trim() || null,
+      expenseDate: values.expenseDate,
     });
   }
 
@@ -65,76 +68,13 @@ export function SuggestionReview({
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Chip label="Amount">
-          <input
-            className={fieldClass}
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-            autoFocus={suggestion.amount === null}
-          />
-        </Chip>
+      <ExpenseFields
+        values={values}
+        onChange={(patch) => setValues((current) => ({ ...current, ...patch }))}
+        autoFocusAmount={suggestion.amount === null}
+      />
 
-        <Chip label="Currency">
-          <select
-            className={fieldClass}
-            value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
-          >
-            {CURRENCIES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
-        </Chip>
-
-        <Chip label="Merchant">
-          <input
-            className={fieldClass}
-            value={merchant}
-            onChange={(event) => setMerchant(event.target.value)}
-            placeholder="Not recognised"
-          />
-        </Chip>
-
-        <Chip label="Category">
-          <select
-            className={fieldClass}
-            value={category}
-            onChange={(event) => setCategory(event.target.value as CategoryName)}
-          >
-            {CATEGORY_NAMES.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </Chip>
-
-        <Chip label="Date">
-          <input
-            type="date"
-            className={fieldClass}
-            value={expenseDate}
-            max={new Date().toISOString().slice(0, 10)}
-            onChange={(event) => setExpenseDate(event.target.value)}
-          />
-        </Chip>
-
-        <Chip label="Note" wide>
-          <input
-            className={fieldClass}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="Optional"
-          />
-        </Chip>
-      </div>
-
-      {!amountIsUsable && (
+      {!usable && (
         <p className="text-sm text-slate-500">
           {suggestion.amount === null
             ? "No amount was found in that sentence. Add one to save it."
@@ -145,7 +85,7 @@ export function SuggestionReview({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={!amountIsUsable || saving}
+          disabled={!usable || saving}
           className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
         >
           {saving ? "Saving..." : "Save expense"}

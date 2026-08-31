@@ -149,6 +149,37 @@ export function createExpense(expense: NewExpense): Promise<Expense> {
   });
 }
 
+/**
+ * The fields an edit may carry.
+ *
+ * Every key is optional, and that is the whole meaning of a PATCH: a key that is
+ * absent leaves that field alone. `null` on merchant or description is different
+ * again — it means empty this field — which is why they are nullable rather than
+ * simply omitted when blank.
+ */
+export type ExpensePatch = {
+  amount?: number;
+  currency?: string;
+  merchant?: string | null;
+  category?: CategoryName;
+  description?: string | null;
+  expenseDate?: string;
+};
+
+/**
+ * Change an expense that already exists.
+ *
+ * The second call on this page that writes anything, and like the first it goes
+ * to an endpoint that validates with the same Zod rules the create route uses.
+ * No AI is involved in an edit at all — a person is typing directly.
+ */
+export function updateExpense(id: string, patch: ExpensePatch): Promise<Expense> {
+  return request(`/api/expenses/${id}`, expenseSchema, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
 export function listExpenses(limit = 5): Promise<{ expenses: Expense[]; total: number }> {
   return request(`/api/expenses?limit=${limit}`, expenseListSchema);
 }

@@ -992,6 +992,15 @@ want when someone asks you about the project in six months.
 | Saving an expense clears the written summary | Rather than leaving it on screen | The sentence describes totals as they were a moment ago. Next to freshly updated cards it would state a different number for the same month. Clearing is honest; silently going stale is not. |
 | The parser is handed a readable month | "August 2026", not "2026-08-01" | The request object exists only to become a sentence, and the mock interpolates the field straight into one. It produced "In 2026-08-01 you spent" until this changed. The ISO date is still what the HTTP response carries. |
 | The summary body is an empty strict object | `z.strictObject({})` | The endpoint summarises the current month, which the server already knows, and there is no control on the page for choosing another. Strict rather than absent so that a `{"month": "2026-07"}` sent hopefully gets a 400 instead of being ignored — the same rule the analytics query strings follow. |
+| Editing is a PATCH, not a PUT | The body carries only the fields being changed | A PUT means "here is the whole row", which forces every caller to send six fields to change one, and makes an absent field indistinguishable from a deliberate blank. With a PATCH, correcting a shop name is a body with one key in it. |
+| The update schema is written out, not `createExpenseSchema.partial()` | Same field schemas, listed again as optional | `.partial()` would have carried `currency`'s `.default("EUR")` into a patch. Omitting the currency — the normal thing when only fixing a shop name — would then have silently rewritten a krona expense into euros. Optional has to mean "leave it alone", never "reset it". |
+| `null` clears a field; an absent key does not | `merchant: null` empties it, no `merchant` key leaves it | Clearing a merchant is a real edit and there has to be a way to say it. Treating an empty string as "no change" would make the field impossible to empty; treating an absent key as "clear it" would wipe five fields every time one was corrected. |
+| `source` cannot be edited | Left out of the update schema entirely | It records where a row came from. An edit changes what an expense says, not where it came from, and being able to relabel an MCP row as a web row would destroy the one column that proves the assistant wrote it. |
+| The euro figure is recomputed only when the money moves | Amount, currency or date changed | It is derived from all three, using the rate for the day it was spent, so leaving it stale after any of them changes would quietly corrupt every total and chart. Recomputing on *every* edit would be equally wrong in the other direction: a request to the rate service, and a fresh conversion, for a typo in a shop name. |
+| The browser sends a diff, not the whole form | `buildPatch` compares against the row it opened | Without it every edit would arrive carrying all six fields, and the backend cannot tell "unchanged" from "sent again" — so renaming a shop would re-convert the currency. The editor also shows the count, which makes the PATCH semantics visible rather than a claim in a comment. |
+| One row edits at a time | The open row is an id held by the page, not a flag per row | Two half-finished edits on screen are two chances to lose typing by clicking away, and nobody edits two expenses in parallel. |
+| The chips moved into their own component | `ExpenseFields`, used by the confirm step and the editor | The two screens need the same six fields under the same rules. Two copies would drift — a currency added to one list and not the other, a date limit enforced when creating but not when correcting. |
+| `update_expense` is marked destructive | `destructiveHint: true`, like delete | MCP's hint asks whether a tool is additive or overwrites. An update overwrites, and the previous value is not recoverable, so a client that confirms destructive calls should confirm this one. |
 
 ---
 
@@ -1938,3 +1947,98 @@ with no key set anywhere throughout.
 
 The MCP server has no tool for this. Nothing asked for one, and the six tools in the plan are
 about querying and adding expenses rather than generating prose.
+
+### Session 16 — editing an expense, and the default that would have eaten a currency
+
+**What was added**
+
+Three things, one feature: `PATCH /api/expenses/:id`, an edit control on every row of the
+recent list, and an `update_expense` MCP tool. Any of the six fields can be corrected —
+merchant, category, amount, currency, date, note.
+
+This is the first thing built that the build plan never mentioned. It was asked for
+directly, which is different from being suggested, and `progress.md` now has a "beyond the
+plan" section so the distinction stays visible.
+
+**PATCH, and what a missing field means**
+
+A PUT would mean "here is the whole row". A PATCH means "here is what changed", and that is
+the right shape here: correcting a shop name should be a body with one key in it.
+
+That makes three states rather than two, and all three have to be distinguishable:
+
+| The body says | It means |
+|---|---|
+| no `merchant` key | leave the merchant alone |
+| `"merchant": "Lidl"` | set it to Lidl |
+| `"merchant": null` | empty it |
+
+Without the third, a merchant could never be cleared. Without the first, correcting one field
+would wipe the other five.
+
+**The shortcut that would have quietly changed people's money**
+
+The obvious way to write the update schema is `createExpenseSchema.partial()` — same rules,
+everything optional, one line. It is wrong, and wrong in a way that would not have shown up
+for a long time.
+
+`createExpenseSchema` declares `currency: currencySchema.default("EUR")`. A default fires
+when a key is *absent*. Under `.partial()` the field is optional, so omitting the currency is
+allowed — and the default then fills it in as EUR. Editing the shop name on a 300 SEK
+expense, without touching the currency at all, would have rewritten it as €300.
+
+So the update schema lists its fields explicitly, reusing the same field schemas but without
+the defaults. **A default is a statement about what to do when something is missing, and
+"missing" means opposite things when creating and when patching.**
+
+**The derived column that must not be left behind**
+
+`amount_eur` is not typed in; it is computed from the amount, the currency and the date,
+using the rate from the day the money was spent. Change any of those three and a stored euro
+figure describes a conversion that never happened — and every total, card and chart is built
+on that column.
+
+So the route recomputes it when, and only when, one of those three moves. Changing the
+merchant or the category skips the conversion entirely, which is not just tidiness: it means
+no request goes out to the exchange rate service for an edit that could not have moved the
+number.
+
+The browser cooperates by sending a diff rather than the whole form. Without that, every edit
+would arrive carrying all six fields, and the backend cannot tell "unchanged" from "sent
+again" — so renaming a shop would re-convert the currency after all. The editor shows a
+running "1 field will change", which makes the rule visible on screen instead of only in a
+comment.
+
+**The chips are now shared rather than copied**
+
+The confirm step's six chips became `ExpenseFields`, rendered by both the confirm step and
+the editor. They need identical rules — the same currency list, the same category list, the
+same "no future dates" limit — and two copies of that is how one of them ends up with a
+currency the other does not have.
+
+**Verified**
+
+Against the running stack, through Caddy:
+
+- merchant-only edit on a £30 row: `amountEur` stayed at 35.00, untouched
+- currency GBP → EUR on the same row: recomputed to 30.00
+- `"description": null` cleared the note
+- empty body, `source`, an amount of zero, 31 February, and an unknown category are each
+  refused with a specific message
+- a well-formed id that belongs to nothing gives a 404
+
+All seven MCP tools pass over stdio, including an assertion that renaming the shop on a
+100 USD row leaves €87.68 alone and changing the amount to 200 USD moves it to €175.36.
+67 backend tests, all render checks, three typechecks.
+
+**Two checks that were wrong before the code was**
+
+The MCP check looked for `200 USD` in a message that says `200.00 USD`. And a bundle grep for
+`children:"Edit"` found nothing because the minifier emits backticks — the button was there
+all along. Both were my assertions being wrong rather than the thing under test, which is the
+third time in this project a check has needed more scepticism than the code did.
+
+**Still not built**
+
+There is still no delete button in the interface. Editing a row and removing one are
+different decisions, and only the first was asked for.

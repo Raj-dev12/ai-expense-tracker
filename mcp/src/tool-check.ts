@@ -35,9 +35,9 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
 const { tools } = await client.listTools();
 const names = tools.map((tool) => tool.name).sort();
 check(
-  "all six tools are advertised",
+  "all seven tools are advertised",
   names.join(",") ===
-    "add_expense,delete_expense,get_expense_summary,get_spending_by_category,list_expenses,search_expenses",
+    "add_expense,delete_expense,get_expense_summary,get_spending_by_category,list_expenses,search_expenses,update_expense",
   names.join(", "),
 );
 check(
@@ -45,8 +45,11 @@ check(
   tools.every((tool) => (tool.description ?? "").length > 80),
 );
 check(
-  "the destructive one is marked destructive",
-  tools.find((t) => t.name === "delete_expense")?.annotations?.destructiveHint === true,
+  "the destructive ones are marked destructive",
+  ["delete_expense", "update_expense"].every(
+    (name) => tools.find((t) => t.name === name)?.annotations?.destructiveHint === true,
+  ),
+  "an update overwrites what was there, so it is not an additive change",
 );
 check(
   "the reading tools are marked read-only",
@@ -101,6 +104,62 @@ check(
 );
 const foreignId = foreign.body.match(/id is ([0-9a-f-]{36})/)?.[1];
 
+// --- editing -----------------------------------------------------------------
+// The rule worth proving is that an untouched field stays untouched. The euro
+// figure is the one that would give it away: renaming the shop on the dollar row
+// must not re-convert it.
+const beforeRename = foreign.body.match(/€([0-9.]+)/)?.[1];
+const renamed = foreignId
+  ? await callTool("update_expense", { id: foreignId, merchant: "Tool check renamed" })
+  : { body: "no id", isError: true };
+check("update_expense changes one field", !renamed.isError && renamed.body.includes("Tool check renamed"), renamed.body);
+check(
+  "update_expense leaves the euro amount alone when the money did not change",
+  Boolean(beforeRename) && renamed.body.includes(`€${beforeRename}`),
+  `was €${beforeRename}, now ${renamed.body.match(/€[0-9.]+/)?.[0]}`,
+);
+check("update_expense says which fields it changed", renamed.body.startsWith("Updated merchant."), renamed.body.slice(0, 40));
+
+const recategorised = foreignId
+  ? await callTool("update_expense", { id: foreignId, category: "Travel", description: null })
+  : { body: "no id", isError: true };
+check("update_expense can change several fields at once", !recategorised.isError && recategorised.body.includes("Travel"), recategorised.body);
+
+const repriced = foreignId
+  ? await callTool("update_expense", { id: foreignId, amount: 200 })
+  : { body: "no id", isError: true };
+check(
+  "update_expense re-converts when the amount changes",
+  !repriced.isError &&
+    !repriced.body.includes(`€${beforeRename}`) &&
+    repriced.body.includes("200.00 USD"),
+  `was €${beforeRename}, now ${repriced.body.match(/€[0-9.]+/)?.[0]}`,
+);
+
+const emptyPatch = foreignId
+  ? await callTool("update_expense", { id: foreignId })
+  : { body: "no id", isError: true };
+check(
+  "update_expense with nothing to change is refused",
+  emptyPatch.isError && emptyPatch.body.includes("at least one field"),
+  emptyPatch.body.slice(0, 70),
+);
+
+const badUpdate = foreignId
+  ? await callTool("update_expense", { id: foreignId, amount: -1 })
+  : { body: "no id", isError: true };
+check("update_expense refuses a negative amount", badUpdate.isError, badUpdate.body.slice(0, 70));
+
+const missingUpdate = await callTool("update_expense", {
+  id: "11111111-1111-4111-8111-111111111111",
+  merchant: "nowhere",
+});
+check(
+  "updating something that is not there is refused",
+  missingUpdate.isError && missingUpdate.body.includes("No expense with that id"),
+  missingUpdate.body.slice(0, 60),
+);
+
 const findable = await callTool("search_expenses", { query: "Tool check" });
 check("a row added through MCP is findable", !findable.isError && findable.body.includes("Tool check cafe"));
 check("rows added through MCP are marked as such", findable.body.includes("Tool check"), "source recorded server-side");
@@ -142,5 +201,5 @@ const gone = await callTool("search_expenses", { query: "Tool check" });
 check("the test rows are gone again", gone.body.includes("Nothing matches"));
 
 await client.close();
-console.log(failures ? `\n${failures} CHECK(S) FAILED` : "\nall six tools work over stdio");
+console.log(failures ? `\n${failures} CHECK(S) FAILED` : "\nall seven tools work over stdio");
 process.exit(failures ? 1 : 0);

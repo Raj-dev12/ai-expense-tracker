@@ -76,6 +76,16 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 - [ ] HTTPS padlock showing
 - [ ] Seed script run in production
 
+## Beyond the plan
+
+Asked for after the build plan was written, and built on request rather than suggested.
+
+- [x] `PATCH /api/expenses/:id` — any field editable, same Zod field schemas as create,
+      and the euro figure recomputed only when the amount, currency or date moves
+- [x] Edit control on each row of the recent list, reusing the confirm step chips
+- [x] `update_expense` MCP tool, so an assistant can correct a row it added
+- [x] Verified: 67 backend tests, all render checks, all seven MCP tools over stdio
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

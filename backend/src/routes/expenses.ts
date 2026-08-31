@@ -11,6 +11,7 @@ import {
   createExpenseSchema,
   expenseIdParamSchema,
   listExpensesQuerySchema,
+  updateExpenseSchema,
 } from "../schemas/expense.js";
 
 /**
@@ -144,6 +145,84 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     if (!row) throw new HttpError(404, "No expense with that id");
 
     return serializeExpense(row);
+  });
+
+  /**
+   * Change an expense that already exists.
+   *
+   * A PATCH rather than a PUT: it carries only the fields being changed, so
+   * correcting a shop name is a body with one key in it. A key that is absent
+   * means "leave this alone", which is a different thing from `merchant: null`,
+   * meaning "empty this field". `updateExpenseSchema` enforces that distinction;
+   * this route only has to respect it.
+   *
+   * It writes, so it goes through Zod exactly like the create route, using the
+   * same field schemas. Nothing here knows or cares whether the change came from
+   * the browser, an AI assistant or curl.
+   */
+  app.patch("/api/expenses/:id", async (request) => {
+    const { id } = validate(expenseIdParamSchema, request.params, "expense id");
+    const patch = validate(updateExpenseSchema, request.body, "changes");
+    const userId = await getDemoUserId();
+
+    const [existing] = await db
+      .select()
+      .from(expenses)
+      .where(and(eq(expenses.id, id), eq(expenses.userId, userId)))
+      .limit(1);
+
+    if (!existing) throw new HttpError(404, "No expense with that id");
+
+    const changes: Partial<typeof expenses.$inferInsert> = {};
+
+    if (patch.amount !== undefined) changes.amount = toMoneyString(patch.amount);
+    if (patch.currency !== undefined) changes.currency = patch.currency;
+    if (patch.category !== undefined) changes.category = patch.category;
+    if (patch.expenseDate !== undefined) changes.expenseDate = patch.expenseDate;
+    // `in` rather than `!== undefined`, because null is a real value here: it
+    // means the person cleared the field, and that has to be told apart from
+    // never having mentioned it.
+    if ("merchant" in patch) changes.merchant = patch.merchant ?? null;
+    if ("description" in patch) changes.description = patch.description ?? null;
+
+    /**
+     * The euro figure is derived, so it cannot be left behind.
+     *
+     * It depends on three things: the amount, the currency, and the day — the
+     * rate used is the one from the day the money was spent. Change any of them
+     * and the stored euro amount is now describing a conversion that never
+     * happened, which would quietly corrupt every total and chart on the page.
+     *
+     * Changing only the merchant or the category touches none of that, so the
+     * conversion is skipped entirely and no request goes out to the rate service
+     * for an edit that cannot have moved the number.
+     */
+    const moneyChanged =
+      patch.amount !== undefined ||
+      patch.currency !== undefined ||
+      patch.expenseDate !== undefined;
+
+    if (moneyChanged) {
+      // The stored amount is a decimal string; it becomes a number only to be
+      // converted, and the result goes straight back to a string. Nothing is
+      // stored as a float at any point.
+      const amount = patch.amount ?? Number(existing.amount);
+      const currency = patch.currency ?? existing.currency;
+      const expenseDate = patch.expenseDate ?? existing.expenseDate;
+
+      const conversion = await convertToEur(amount, currency, expenseDate);
+      changes.amountEur = toMoneyString(conversion.amountEur);
+    }
+
+    const [updated] = await db
+      .update(expenses)
+      .set(changes)
+      .where(and(eq(expenses.id, id), eq(expenses.userId, userId)))
+      .returning();
+
+    if (!updated) throw new HttpError(500, "The expense could not be updated");
+
+    return serializeExpense(updated);
   });
 
   app.delete("/api/expenses/:id", async (request) => {

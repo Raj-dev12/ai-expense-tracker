@@ -19,9 +19,10 @@
  * that caused that bug. Treat them as a tripwire, not as proof.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import type { CategorySlice, Expense, Summary } from "./api";
+import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
 import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
+import { buildPatch } from "./components/ExpenseEditor";
 import { MonthlySummary } from "./components/MonthlySummary";
 import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
@@ -186,7 +187,17 @@ const expenses: Expense[] = [
     expenseDate: "2026-08-31", createdAt: "2026-08-31T00:00:00.000Z", source: "mcp",
   },
 ];
-const list = renderToStaticMarkup(<RecentExpenses expenses={expenses} total={97} />);
+const listProps = {
+  editingId: null,
+  savingEdit: false,
+  editError: null,
+  onEdit: () => {},
+  onCancelEdit: () => {},
+  onSaveEdit: () => {},
+};
+const list = renderToStaticMarkup(
+  <RecentExpenses expenses={expenses} total={97} {...listProps} />,
+);
 check("list: foreign currency shown", list.includes("30.00 GBP"));
 check("list: euro amount shown", list.includes("35.10"));
 check("list: euro row does not repeat itself", !list.includes("12.50 EUR"));
@@ -269,5 +280,77 @@ const writing = renderToStaticMarkup(
 );
 check("summary: button says it is working", writing.includes("Writing..."));
 check("summary: button disabled while working", writing.includes("disabled"));
+
+// 9. Editing a row in place.
+const editable = expenses[0]!;
+
+check("list: every row offers an edit", (list.match(/>Edit</g) ?? []).length === expenses.length);
+
+const editing = renderToStaticMarkup(
+  <RecentExpenses
+    expenses={expenses}
+    total={97}
+    {...listProps}
+    editingId={editable.id}
+  />,
+);
+check("edit: the open row shows the chips", editing.includes(">Amount</span>"));
+check("edit: same six chips as the add box", ["Amount", "Currency", "Merchant", "Category", "Date", "Note"].every((l) => editing.includes(`>${l}</span>`)));
+check("edit: the row it replaces is gone", !editing.includes("35.10"));
+check("edit: other rows are untouched", editing.includes("12.50"));
+check("edit: save button", editing.includes("Save changes"));
+
+// The PATCH rule, asserted directly: an untouched form must send nothing, and a
+// changed field must send only itself. This is what keeps renaming a shop from
+// re-converting the currency.
+const unchanged = buildPatch(editable, {
+  amount: editable.amount,
+  currency: editable.currency,
+  merchant: editable.merchant ?? "",
+  category: editable.category as CategoryName,
+  expenseDate: editable.expenseDate,
+  note: editable.description ?? "",
+});
+check("patch: an untouched form changes nothing", Object.keys(unchanged).length === 0, JSON.stringify(unchanged));
+
+const renamed = buildPatch(editable, {
+  amount: editable.amount,
+  currency: editable.currency,
+  merchant: "Lidl",
+  category: editable.category as CategoryName,
+  expenseDate: editable.expenseDate,
+  note: editable.description ?? "",
+});
+check("patch: renaming sends only the merchant", JSON.stringify(renamed) === '{"merchant":"Lidl"}', JSON.stringify(renamed));
+
+const cleared = buildPatch(editable, {
+  amount: editable.amount,
+  currency: editable.currency,
+  merchant: "",
+  category: editable.category as CategoryName,
+  expenseDate: editable.expenseDate,
+  note: editable.description ?? "",
+});
+check("patch: clearing a field sends null, not an empty string", cleared.merchant === null, JSON.stringify(cleared));
+
+const repriced = buildPatch(editable, {
+  amount: "41.00",
+  currency: editable.currency,
+  merchant: editable.merchant ?? "",
+  category: editable.category as CategoryName,
+  expenseDate: editable.expenseDate,
+  note: editable.description ?? "",
+});
+check("patch: a new amount is sent as a number", repriced.amount === 41, JSON.stringify(repriced));
+
+const commaTyped = buildPatch(editable, {
+  amount: "41,50",
+  currency: editable.currency,
+  merchant: editable.merchant ?? "",
+  category: editable.category as CategoryName,
+  expenseDate: editable.expenseDate,
+  note: editable.description ?? "",
+});
+check("patch: a comma decimal is understood", commaTyped.amount === 41.5, JSON.stringify(commaTyped));
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");

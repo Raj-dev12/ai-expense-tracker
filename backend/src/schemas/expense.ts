@@ -66,18 +66,55 @@ const amountSchema = z
   .positive("Amount must be greater than zero")
   .max(1_000_000, "Amount is implausibly large");
 
+const merchantSchema = z.string().trim().min(1).max(120);
+const descriptionSchema = z.string().trim().max(500);
+
 /** The body of POST /api/expenses — the one and only door into the table. */
 export const createExpenseSchema = z.strictObject({
   amount: amountSchema,
   currency: currencySchema.default("EUR"),
-  merchant: z.string().trim().min(1).max(120).nullish(),
+  merchant: merchantSchema.nullish(),
   category: categorySchema,
-  description: z.string().trim().max(500).nullish(),
+  description: descriptionSchema.nullish(),
   expenseDate: isoDateSchema,
   source: sourceSchema.default("web"),
 });
 
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
+
+/**
+ * The body of PATCH /api/expenses/:id.
+ *
+ * Every field is the *same* schema the create route uses, so an amount that
+ * would be rejected on the way in is rejected on the way through as well. There
+ * is one rule about editing that creating does not have, and it is worth saying
+ * why the obvious shortcut is wrong: this is not `createExpenseSchema.partial()`.
+ * That would carry `currency`'s `.default("EUR")` into a patch, and omitting the
+ * currency — the normal thing to do when only fixing a shop name — would
+ * silently rewrite a Swedish krona expense into euros. Optional here has to mean
+ * "leave it alone", never "reset it".
+ *
+ * `source` is missing on purpose. It records where a row came from, and history
+ * is not a thing an edit gets to rewrite.
+ *
+ * `merchant` and `description` are nullable because clearing them is a real
+ * edit. Sending `null` empties the field; leaving the key out entirely does
+ * nothing to it.
+ */
+export const updateExpenseSchema = z
+  .strictObject({
+    amount: amountSchema.optional(),
+    currency: currencySchema.optional(),
+    merchant: merchantSchema.nullish(),
+    category: categorySchema.optional(),
+    description: descriptionSchema.nullish(),
+    expenseDate: isoDateSchema.optional(),
+  })
+  .refine((patch) => Object.keys(patch).length > 0, {
+    message: "Send at least one field to change",
+  });
+
+export type UpdateExpenseInput = z.infer<typeof updateExpenseSchema>;
 
 /**
  * Filters for GET /api/expenses. Everything in a query string arrives as text,

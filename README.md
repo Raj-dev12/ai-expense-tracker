@@ -23,8 +23,9 @@ stretch of last month, a pie of where the money went, a fourteen-week trend line
 most recent expenses. Amounts entered in another currency are converted to euros using the
 European Central Bank's rate *for the day they were spent*, and both figures are kept. A
 button asks the AI to describe the month in a sentence or two, and the card underneath it says
-which parser actually wrote that sentence. An MCP server lets an outside AI assistant query
-the same data and add expenses through the same API a browser uses.
+which parser actually wrote that sentence. Any row in the list can be corrected in place,
+using the same chips the confirm step uses. An MCP server lets an outside AI assistant query
+the same data, add expenses and correct them, through the same API a browser uses.
 
 ## Architecture
 
@@ -58,7 +59,7 @@ anywhere else.
 | Backend | TypeScript, Fastify, Drizzle, PostgreSQL, Zod | Zod validates every input crossing a boundary. Money is `numeric(12,2)` — a decimal column, never a float. |
 | Frontend | TypeScript, React, Vite, Tailwind, Recharts | One page, no router. Light theme, one accent colour. |
 | AI | `@anthropic-ai/sdk`, `openai`, and an offline mock | One `ExpenseParser` interface, three implementations, chosen by an environment variable. |
-| MCP | `@modelcontextprotocol/sdk` over stdio | Six tools, each calling the backend's HTTP API rather than the database. |
+| MCP | `@modelcontextprotocol/sdk` over stdio | Seven tools, each calling the backend's HTTP API rather than the database. |
 | Serving | Caddy | Serves the built frontend, proxies `/api`, and obtains HTTPS certificates by itself. |
 | Exchange rates | Frankfurter (ECB data) | Free, no key, history back to 1999. Cached for 24 hours, with a static fallback table. |
 
@@ -140,9 +141,9 @@ request falls back to the mock rather than failing — and the response names th
 
 ## The MCP server runs locally, not in compose
 
-An MCP server exposes tools to an AI assistant. This one has six: `add_expense`,
-`list_expenses`, `search_expenses`, `get_spending_by_category`, `get_expense_summary` and
-`delete_expense`.
+An MCP server exposes tools to an AI assistant. This one has seven: `add_expense`,
+`update_expense`, `list_expenses`, `search_expenses`, `get_spending_by_category`,
+`get_expense_summary` and `delete_expense`.
 
 It is **not** a container and is **not** in `docker-compose.yml`, and that is deliberate
 rather than unfinished. It speaks the stdio transport: the AI client launches it as a child
@@ -183,6 +184,7 @@ GET    /api/health
 POST   /api/expenses
 GET    /api/expenses            from, to, category, minAmount, search, limit, offset
 GET    /api/expenses/:id
+PATCH  /api/expenses/:id      change any field; omitted fields are left alone
 DELETE /api/expenses/:id
 GET    /api/analytics/summary   month to date, vs the same days last month
 GET    /api/analytics/categories
@@ -222,7 +224,7 @@ reasonable ideas; all would make this a bigger project rather than a clearer one
 │   └── Dockerfile    multi-stage: compiles TypeScript, ships only the result
 ├── frontend/         React single page
 │   └── Dockerfile    multi-stage: vite build, then Caddy serving the files
-├── mcp/              MCP server — six tools, calls the HTTP API (no Dockerfile)
+├── mcp/              MCP server — seven tools, calls the HTTP API (no Dockerfile)
 ├── Caddyfile         serves the frontend, proxies /api to the backend
 ├── docker-compose.yml
 ├── build-plan.md     the full specification

@@ -36,8 +36,8 @@ const server = new McpServer(
   {
     instructions:
       "Tools for a personal expense tracker. Reading tools can be used freely to answer " +
-      "questions about spending. add_expense and delete_expense change stored data and " +
-      "should only be used when the person has actually asked for that.",
+      "questions about spending. add_expense, update_expense and delete_expense change " +
+      "stored data and should only be used when the person has actually asked for that.",
   },
 );
 
@@ -111,6 +111,76 @@ server.registerTool(
           : ` (${saved.amount} ${saved.currency} converted at the rate for ${saved.expenseDate})`;
 
       return text(`Saved: €${saved.amountEur}${converted} at ${saved.merchant ?? "an unnamed place"} on ${saved.expenseDate}, filed under ${saved.category}. Its id is ${saved.id}.`);
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.registerTool(
+  "update_expense",
+  {
+    title: "Change an expense",
+    description:
+      "Change one or more fields of an expense that already exists. Ids come from " +
+      "list_expenses or search_expenses — never invent one, and never guess which row was " +
+      "meant; if more than one could match, show them and ask which. Send only the fields " +
+      "being changed: anything left out keeps its current value, so to correct a shop name " +
+      "you send the id and the merchant and nothing else. Send merchant or description as " +
+      "null to empty them. Changing the amount, the currency or the date re-converts the euro " +
+      "figure automatically using the rate for the day it was spent, so pass the amount as it " +
+      "was actually spent rather than converting it yourself. This overwrites stored data and " +
+      "cannot be undone, so only use it when the person has asked for a change.",
+    inputSchema: {
+      id: z.string().describe("The id of the expense to change, taken from a listing"),
+      amount: z
+        .number()
+        .positive()
+        .optional()
+        .describe("A corrected amount, in the currency it was spent in"),
+      currency: z.enum(CURRENCIES).optional().describe("A corrected three-letter code"),
+      merchant: z
+        .string()
+        .max(120)
+        .nullable()
+        .optional()
+        .describe("A corrected shop or company. Pass null to clear it"),
+      category: z.enum(CATEGORY_NAMES).optional().describe("A corrected category"),
+      description: z
+        .string()
+        .max(500)
+        .nullable()
+        .optional()
+        .describe("A corrected note. Pass null to clear it"),
+      expenseDate: isoDate.optional().describe("A corrected date, as YYYY-MM-DD"),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  async (args) => {
+    try {
+      const { id, ...changes } = args;
+
+      // Only the keys the assistant actually sent are forwarded. Filling in the
+      // rest from a previous read would turn every edit into a full overwrite,
+      // and would re-convert the currency on an edit that never touched it.
+      const patch = Object.fromEntries(
+        Object.entries(changes).filter(([, value]) => value !== undefined),
+      );
+
+      const updated = await call(`/api/expenses/${id}`, expenseSchema, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+
+      const fields = Object.keys(patch).join(", ");
+      const converted =
+        updated.currency === "EUR"
+          ? ""
+          : ` (${updated.amount} ${updated.currency} converted at the rate for ${updated.expenseDate})`;
+
+      return text(
+        `Updated ${fields}. It is now €${updated.amountEur}${converted} at ${updated.merchant ?? "an unnamed place"} on ${updated.expenseDate}, filed under ${updated.category}.`,
+      );
     } catch (error) {
       return fail(error);
     }
