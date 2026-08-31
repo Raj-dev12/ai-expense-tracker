@@ -1,5 +1,6 @@
 import type { Summary } from "../api";
-import { formatMoney, formatMonth } from "../format";
+import { formatDayMonth, formatMoney } from "../format";
+import { PERIOD_NOUNS, type Period } from "../periods";
 
 /**
  * Four numbers, shown as numbers.
@@ -27,48 +28,66 @@ function Card({
   );
 }
 
+/**
+ * Nothing here says "month" any more.
+ *
+ * Every label in this card used to: "Spent in August", "entries this month",
+ * "across the month so far", "against the same 31 days last month". All of that
+ * was true when a month was the only period there was, and every one of them
+ * became a false statement the moment the period dropdown arrived — a quarter
+ * was reported as "31 days last month" while the figure underneath compared it
+ * against 30 April to 30 June.
+ *
+ * The comparison note now names the window it actually compared against, taken
+ * from the response rather than described in prose. A reader can check it
+ * against the calendar; there is nothing left to misread.
+ */
 export function SummaryCards({
   summary,
   currency,
+  period,
 }: {
   summary: Summary;
   currency: string;
+  period: Period;
 }) {
-  const month = formatMonth(summary.from);
+  const noun = PERIOD_NOUNS[period];
+  const days = `${summary.daysElapsed} ${summary.daysElapsed === 1 ? "day" : "days"}`;
+  const before = `${formatDayMonth(summary.previous.from)} – ${formatDayMonth(summary.previous.to)}`;
 
   /**
    * The comparison is deliberately not coloured green or red.
    *
-   * Spending more than last month is not automatically bad — it might be a
-   * holiday, or rent falling in a different week — and painting it red would be
+   * Spending more than the stretch before is not automatically bad — it might be
+   * a holiday, or rent falling in a different week — and painting it red would be
    * the interface drawing a conclusion the data does not support. An arrow and a
    * plain sentence say what happened and leave the judgement to the reader.
    */
   const change = summary.changePercent;
   const comparison =
     change === null
-      ? "Nothing recorded for the same days last month"
-      : `${change >= 0 ? "↑" : "↓"} ${Math.abs(change)}% against the same ${summary.daysElapsed} days last month`;
+      ? `Nothing recorded in ${before}`
+      : `${change >= 0 ? "↑" : "↓"} ${Math.abs(change)}% against ${before}`;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card
-        label={`Spent in ${month}`}
+        label={`Spent ${noun}`}
         value={formatMoney(summary.totalBase, currency)}
-        note={`${summary.daysElapsed} days so far`}
+        note={`${days} so far`}
       />
       <Card
         label="Expenses"
         value={String(summary.count)}
-        note={summary.count === 1 ? "one entry" : "entries this month"}
+        note={summary.count === 1 ? "one entry" : `entries ${noun}`}
       />
       <Card
         label="Daily average"
         value={formatMoney(summary.dailyAverageBase, currency)}
-        note="across the month so far"
+        note={`across ${days}`}
       />
       <Card
-        label="Against last month"
+        label="Change"
         value={change === null ? "—" : `${change >= 0 ? "+" : ""}${change}%`}
         note={comparison}
       />

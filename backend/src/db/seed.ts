@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { env } from "../env.js";
-import { addDays, todayIso } from "../lib/dates.js";
+import { addDays, dayOfMonth, startOfMonth, todayIso } from "../lib/dates.js";
 import type { CategoryName } from "../lib/categories.js";
 import { SEED_CATEGORY_NAMES } from "../lib/categories.js";
 import { toMoneyString } from "../lib/money.js";
@@ -207,6 +207,28 @@ async function main() {
 
   const rows: NewExpenseRow[] = [];
 
+  /**
+   * The first expense of every category always lands in the current calendar
+   * month; the rest spread across the previous ninety days as before.
+   *
+   * Dates used to be spread over the ninety days before the seed ran, and
+   * nothing else. That is fine on the twentieth and empty on the first: the
+   * dashboard defaults to the current calendar month, so seeding a minute after
+   * midnight on the first of a month opened an app with no expenses, no pie and
+   * no totals — which reads as broken rather than as new. It happened here, one
+   * minute after a seed at 23:59.
+   *
+   * One per category rather than a block of them, so the pie still has every
+   * colour in it on the first of the month rather than a single slice.
+   */
+  const monthStart = startOfMonth(today);
+  const daysIntoMonth = dayOfMonth(today);
+
+  const dateFor = (isFirstOfCategory: boolean): string =>
+    isFirstOfCategory
+      ? addDays(monthStart, Math.floor(random() * daysIntoMonth))
+      : addDays(today, -Math.floor(random() * DAYS_OF_HISTORY));
+
   for (const plan of PLAN) {
     for (let i = 0; i < plan.count; i += 1) {
       const amount = amountBetween(plan.min, plan.max);
@@ -222,7 +244,7 @@ async function main() {
         merchant: merchant.name,
         category: plan.category,
         description: pick(merchant.notes),
-        expenseDate: addDays(today, -Math.floor(random() * DAYS_OF_HISTORY)),
+        expenseDate: dateFor(i === 0),
         source: "seed",
       });
     }

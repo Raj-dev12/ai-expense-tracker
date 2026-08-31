@@ -133,6 +133,13 @@ Asked for after the build plan was written, and built on request rather than sug
       closed grammar is the boundary, and declining is a member of it rather than an error
 - [x] Text that reads as an expense is signposted to the add box rather than refused
 - [x] 46 pure tests pin the boundary, including the ones that must be refused
+- [x] Summary cards stopped saying "month": every label assumed one, so six of the seven
+      periods were reported wrongly. The comparison note now names the window it actually
+      compared against, taken from the response rather than described in prose
+- [x] README audited end to end against the code; thirteen drifted claims fixed
+- [x] Seed guarantees one expense per category in the current calendar month — seeding on
+      the 1st used to open an empty dashboard, which reads as broken rather than as new
+- [x] New screenshot, with a caption that describes what the image actually shows
 - [x] The never-drop-a-constraint rule moved from three preposition-shaped guards to one
       whitelist that accounts for every word, checked before any query shape is chosen —
       "lowest food expense" had walked past all three and answered with a real number

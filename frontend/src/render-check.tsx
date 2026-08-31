@@ -99,22 +99,59 @@ const summary: Summary = {
   previous: { from: "2026-07-01", to: "2026-07-31", totalBase: "1975.22", count: 36 },
   changePercent: -7,
 };
-const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" />);
+const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" period="month" />);
 check("card: month total", cards.includes("1,836.95"), cards.slice(0, 0));
-check("card: names the month", cards.includes("August"));
+check("card: names the period", cards.includes("Spent this month"));
 check("card: count", cards.includes(">31<"));
 check("card: daily average", cards.includes("59.26"));
 check("card: change is signed", cards.includes("-7%"));
-check("card: comparison says what it compares", cards.includes("same 31 days last month"));
+// The note names the window it actually compared against, taken from the
+// response rather than described in prose, so a reader can check it against a
+// calendar.
+check("card: comparison names the window it compared against", cards.includes("1 Jul – 31 Jul"));
 check("card: down arrow for a fall", cards.includes("↓"));
 
+// The bug this card carried from the day the period dropdown arrived: every
+// label said "month", and six of the seven periods are not one. A quarter was
+// reported as "31 days last month" while the figure underneath compared it
+// against 30 April to 30 June.
+const quarterCards = renderToStaticMarkup(
+  <SummaryCards
+    summary={{
+      from: "2026-07-01", to: "2026-08-31", daysElapsed: 62,
+      totalBase: "3837.02", count: 64, dailyAverageBase: "61.89",
+      previous: { from: "2026-04-30", to: "2026-06-30", totalBase: "1422.26", count: 31 },
+      changePercent: 169.8,
+    }}
+    currency="EUR"
+    period="quarter"
+  />,
+);
+check("card: a quarter is not called a month anywhere", !/month/i.test(quarterCards), quarterCards.match(/[^<>]*month[^<>]*/i)?.[0] ?? "");
+check("card: a quarter names itself", quarterCards.includes("Spent this quarter"));
+check("card: a quarter compares against the right window", quarterCards.includes("30 Apr – 30 Jun"));
+
+const dayCards = renderToStaticMarkup(
+  <SummaryCards
+    summary={{
+      from: "2026-08-31", to: "2026-08-31", daysElapsed: 1,
+      totalBase: "56.00", count: 1, dailyAverageBase: "56.00",
+      previous: { from: "2026-08-30", to: "2026-08-30", totalBase: "200.00", count: 1 },
+      changePercent: -72,
+    }}
+    currency="EUR"
+    period="day"
+  />,
+);
+check("card: one day is singular", dayCards.includes("1 day so far") && !dayCards.includes("1 days"));
+check("card: today reads as today", dayCards.includes("Spent today"));
+
 const noComparison = renderToStaticMarkup(
-  <SummaryCards summary={{ ...summary, changePercent: null }} currency="EUR" />,
+  <SummaryCards summary={{ ...summary, changePercent: null }} currency="EUR" period="month" />,
 );
 check(
   "card: nothing to compare is said, not shown as zero",
-  noComparison.includes("Nothing recorded for the same days last month") &&
-    !noComparison.includes("0%"),
+  noComparison.includes("Nothing recorded in") && !noComparison.includes("0%"),
 );
 
 // 5. The pie folds to six slices and always writes the values out.
@@ -408,7 +445,7 @@ check("patch: a comma decimal is understood", commaTyped.amount === 41.5, JSON.s
 // The point of the rename is that nothing says "euro" unless the euro is
 // actually the base, so these render the same fixtures as pounds and check the
 // symbol followed the setting.
-const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="GBP" />);
+const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="GBP" period="month" />);
 check("currency: cards use the base symbol", cardsGbp.includes("£1,836.95"), cardsGbp.match(/[£€][0-9,.]+/)?.[0] ?? "none");
 check("currency: cards do not still say euro", !cardsGbp.includes("€"));
 

@@ -30,6 +30,23 @@ export const PERIODS = [
 
 export type Period = (typeof PERIODS)[number];
 
+/**
+ * The same seven periods as a noun phrase, for dropping into a sentence.
+ *
+ * "This month" is right in a menu and wrong in "Spent This month", and "Today"
+ * has to lose its "this" entirely. Two lists rather than one lowercasing hack,
+ * because the difference is grammar rather than case.
+ */
+export const PERIOD_NOUNS: Record<Period, string> = {
+  day: "today",
+  week: "this week",
+  month: "this month",
+  quarter: "this quarter",
+  half: "this half year",
+  threeQuarters: "these three quarters",
+  year: "this year",
+};
+
 export const PERIOD_LABELS: Record<Period, string> = {
   day: "Today",
   week: "This week",

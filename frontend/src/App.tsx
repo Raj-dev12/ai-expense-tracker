@@ -625,7 +625,9 @@ export default function App() {
           <p className="py-16 text-center text-sm text-slate-400">Loading your expenses...</p>
         ) : (
           <>
-            {summary && <SummaryCards summary={summary} currency={currency} />}
+            {summary && (
+              <SummaryCards summary={summary} currency={currency} period={period} />
+            )}
 
             {summary && (
               <AnalysisCard

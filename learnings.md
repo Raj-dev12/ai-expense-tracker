@@ -1064,6 +1064,9 @@ want when someone asks you about the project in six months.
 | The LIKE escaping lives in `lib/sql.ts` | Shared by the expenses search and the question executor | It has been wrong once already — written as a backslash before a dollar inside a template literal, so it escaped the substitution instead of producing a backslash, and every search found nothing. A rule that subtle gets exactly one home. |
 | The never-drop-a-constraint rule is a whitelist, enforced once | `unreadWords` accounts for every word, and runs before any query shape is chosen | It was three guards keyed on prepositions — `at X`, `on X`, `for X` — and "lowest food expense" walked past all of them, because a noun narrows a question without needing one in front of it. A blacklist of the ways a constraint can appear is a list of the cases somebody thought of; a whitelist that must account for every word is not. Running it before the branching means a sixth query shape inherits the check for free rather than having to remember it. |
 | `KNOWN_WORDS` holds no domain nouns | Grammar, the query vocabulary, units of time — nothing else | Adding "food" to make one question work would be the original bug wearing the guard's clothes. A test asserts an unknown noun is still caught, so that temptation fails loudly rather than quietly. |
+| The comparison note names its window rather than describing it | `↓ 7% against 30 Apr – 30 Jun`, read from the response | Every label on the summary card said "month", which was true when a month was the only period and false for six of the seven the day the dropdown shipped — a quarter was reported as "31 days last month" while the figure underneath compared it against 30 April to 30 June. The numbers were right and only the words were wrong, which is the kind of error a passing test suite is happiest to keep. Prose about a window drifts from the window; a rendered date range cannot. |
+| The seed guarantees the current calendar month | One expense per category inside it, the rest across the previous ninety days | The seed spread backwards from the moment it ran, which is fine on the twentieth and empty on the first: it ran at 23:59 and one minute later the dashboard's default period was a month with nothing in it. A minute-old database looked like a broken one. One per category rather than a block, so the pie still has every colour on the first. |
+| The screenshot caption describes the image, not the intention | It names the period the capture was on, and says the AI panels are empty in it | The capture showed *This week* — a small headline, a single-slice pie, two unused panels. Writing the caption for what was meant rather than what is there would be a small lie in the first thing anyone sees. A screenshot is a claim like any other. |
 
 ---
 
@@ -2935,3 +2938,70 @@ with categories, with shops, with a named month — and all eleven still answer.
 When the rule is "never let something through unnoticed", the only shape that
 holds is one that accounts for everything and refuses the remainder — and it has
 to sit before the branching, not inside it.
+
+### Session 28 — auditing the README, and a card that had been lying since the dropdown arrived
+
+**The audit found fourteen things, and the worst one was not in the README**
+
+`SummaryCards` had **six** month assumptions, not one. Every label in it:
+
+```
+"Spent in August"                       ← for a quarter starting 1 July
+"entries this month"
+"across the month so far"
+"Against last month"
+"against the same 62 days last month"   ← real window: 30 April to 30 June
+"Nothing recorded for the same days last month"
+```
+
+Every one was true when a month was the only period there was, and every one became false
+the moment the period dropdown shipped. Nobody noticed because the *numbers* were right —
+only the words around them were wrong, which is the kind of error a passing test suite is
+happiest to keep.
+
+The fix worth keeping: the comparison note now **names the window it actually compared
+against**, read from the response rather than described in prose — `↓ 7% against 30 Apr – 30
+Jun`. Prose about a window can drift from the window. A rendered date range cannot.
+
+**Documentation drifts silently, and only an audit finds it**
+
+Thirteen README claims had gone stale across a day of changes, and not one of them announced
+itself. The most misleading were the ones that were *nearly* right: "the month's total against
+the same stretch of last month" described behaviour that had been replaced twice.
+
+Two additions to "What is not built" are admissions rather than descriptions, which is what
+that section is for:
+
+- the Claude and OpenAI adapters have **never been run against a live provider** — all three
+  methods, mock-only, because there has never been a key on this machine
+- the trend chart **ignores the period dropdown**, so one chart on the page describes a
+  different window from everything around it
+
+**A demo that looked broken one minute after being seeded**
+
+The seed spread its ninety days backwards from the moment it ran. It ran at 23:59 on 31
+August. At 00:00 the dashboard's default period became September, and September was empty:
+no totals, no pie, no rows. A minute-old database looked like a broken one.
+
+It now guarantees the first expense of every category in the current calendar month — one
+per category rather than a block, so the pie still has every colour in it on the first. On
+the day it would have shown nothing, it shows nine expenses across nine categories.
+
+**Two screenshots were rejected before one was kept**
+
+The first was captured from a browser tab that had never been reloaded: it showed the old
+card wording and pre-reseed data, including two rows the reseed had deleted. The served
+bundle was checked and was current — the tab was not.
+
+The second was honest but unflattering: the period was on *This week*, so the headline read
+€4.80 across one expense and the pie was a single slice, and neither AI panel had been used.
+
+The kept one is that second capture, with a caption that **says all of that**. Writing the
+caption to match the intent rather than the image would have been a small lie in the first
+thing anyone sees. A screenshot is a claim like any other.
+
+**The habit worth naming**
+
+Three times today the honest move was to look at the artefact before installing it — the
+image, the target file, the served bundle. Each time it was wrong in a way that reading the
+instruction would never have revealed.

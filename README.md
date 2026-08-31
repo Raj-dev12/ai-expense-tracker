@@ -5,11 +5,15 @@ before anything is saved.
 
 ---
 
-![The single page: an add box, summary cards, a category breakdown, a weekly trend line and the recent expenses](docs/screenshot.png)
+![The single page, top to bottom: the add box, four summary cards, a period dropdown with the summarise button and a question box, a category pie with its legend, a three-month trend line, a table of one day, the expense list, and the categories panel](docs/screenshot.png)
 
-<sub>Sample data, shown in euros — the currency is chosen on first run, so yours may read
-differently. Each row in the recent list says where it came from — `added by seed`,
-`added by mcp` — which is the `source` column described further down.</sub>
+<sub>Sample data, in euros — the currency is chosen on first run, so yours may read
+differently. The period is set to <strong>This week</strong> here, which is why the totals are
+small and the pie has a single slice; the trend line covers three months whatever the period
+is. The two AI panels are empty in this shot — the summary and the answer appear once you
+press the button or ask something. Rows say where they came from when it was not this page —
+<code>added by mcp</code>, <code>added by seed</code> — which is the <code>source</code> column
+described further down.</sub>
 
 ---
 
@@ -19,15 +23,24 @@ You write "spent 42 euros at Lidl yesterday" into a box. The backend hands that 
 an AI parser, which returns a *suggestion*: an amount, a currency, a merchant, a category and
 a date. The page shows that suggestion as editable chips so you can correct anything it got
 wrong, and only when you press confirm does the browser call the ordinary, validated endpoint
-that writes a row. Below the box, a dashboard shows the month's total against the same
-stretch of last month, a pie of where the money went, a fourteen-week trend line, a table of any single day you
-pick, and every expense in a list that scrolls inside its own box. You pick your currency the first time you open it, from all 162 ISO 4217 codes,
-and every amount is shown in it; changing it later moves no stored number. A
-button asks the AI to describe the period in a sentence or two, and a box beside it answers
-specific questions — "highest week for groceries" — by turning them into a query the database
-runs rather than letting a model near the arithmetic. Any row in the list can be corrected in place or deleted,
-using the same chips the confirm step uses, and categories can be added and removed. An MCP server lets an outside AI assistant query
-the same data, add expenses and correct them, through the same API a browser uses.
+that writes a row.
+
+Below the box is a dashboard. A dropdown chooses the period it describes — day, week, month,
+quarter, half year, three quarters or year — and the cards, the pie and the written summary
+all follow it. The cards show the total against the same number of days immediately before
+that period; the pie shows where the money went, and clicking a slice opens the expenses
+behind it. Alongside them: a fourteen-week trend line, a table of any single day you pick,
+every expense in a list that scrolls inside its own box, and a panel for adding, renaming and
+deleting categories.
+
+A button asks the AI to describe the period in a sentence or two, and a box below it answers
+specific questions — *"highest week for groceries"* — by turning them into a query the
+database runs, rather than letting a model near the arithmetic. Any row in the list can be
+corrected in place or deleted. You pick your currency the first time you open the app, from
+all 162 ISO 4217 codes; changing it later moves no stored number.
+
+An MCP server lets an outside AI assistant query the same data, add expenses and correct
+them, through the same API a browser uses.
 
 ## Architecture
 
@@ -81,7 +94,9 @@ key](#it-runs-with-no-api-key). The backend applies its own database migrations 
 starts, so there is no separate setup step.
 
 The app starts with an empty database. To load the demo data — one user and 93 expenses
-spread over three months, generated from a fixed random seed so it is identical every time:
+spread over three months, generated from a fixed random seed so it is identical every time.
+One expense in every category always lands in the current calendar month, so seeding on the
+first of a month does not open a dashboard with nothing in it:
 
 ```bash
 docker compose exec backend node dist/db/seed.js
@@ -123,6 +138,9 @@ Three things fall out of this:
   The MCP server uses it. Nothing has a private back door to the table.
 - **The promise is checked, not trusted.** The parse response includes `saved: false`, and the
   browser asserts that field with Zod on every single call.
+- **All three AI endpoints make the same promise.** `parse-expense`, `monthly-summary` and
+  `ask` each return `saved: false`, and each is asserted the same way. Nothing an AI touches
+  in this application writes a row.
 
 The `source` column records whether a row came from the web form, the MCP server or the seed
 script — so you can prove that an AI assistant really did write to the database, and by which
@@ -201,7 +219,7 @@ so the refusal paths are the ordinary experience rather than something you only 
 There is no conversion by default. There is one currency — yours — and you pick it before
 anything else happens, on a screen that comes before the dashboard rather than beside it. The
 demo expenses are plain numbers, so what they are numbers *of* is the first thing worth
-establishing; a page showing `1,741.66` with no symbol has told you almost nothing.
+establishing; a total with no symbol in front of it has told you almost nothing.
 
 The choice is remembered against the user, so it is asked once. Afterwards the picker at the
 top right changes it, offering all 162 codes ISO 4217 defines.
@@ -330,8 +348,8 @@ GET    /api/expenses/:id
 PATCH  /api/expenses/:id      change any field; omitted fields are left alone
 DELETE /api/expenses/:id
 GET    /api/analytics/summary   from, to; defaults to this month, vs the days before it
-GET    /api/analytics/categories
-GET    /api/analytics/trend     weekly buckets
+GET    /api/analytics/categories  from, to; defaults to this month
+GET    /api/analytics/trend       from, to; weekly buckets, fourteen weeks by default
 GET    /api/categories          the categories, with how many expenses each holds
 POST   /api/categories          add one
 PATCH  /api/categories/:name    rename it, and every expense filed under it
@@ -358,6 +376,13 @@ one that admits the gaps.
 - **There is no login.** One demo user, created by the seed script, looked up on every
   request. `user_id` is never read from a request body, so adding real authentication later
   changes one function rather than every query.
+- **The real AI providers have never been run.** The Claude and OpenAI adapters implement all
+  three methods against the same Zod schemas, and every one of them has only ever been
+  exercised through the mock. There has been no API key on this machine, so "it works with a
+  real model" is a claim this repository has not earned.
+- **The trend chart ignores the period dropdown.** Deliberate — it is about change over a long
+  run, and squeezing it into "today" would leave a single point — but it does mean one chart on
+  the page is describing a different window from everything around it.
 
 ## Deliberately out of scope
 
@@ -373,6 +398,7 @@ reasonable ideas; all would make this a bigger project rather than a clearer one
 ├── frontend/         React single page
 │   └── Dockerfile    multi-stage: vite build, then Caddy serving the files
 ├── mcp/              MCP server — seven tools, calls the HTTP API (no Dockerfile)
+├── docs/             the screenshot this README opens with
 ├── Caddyfile         serves the frontend, proxies /api to the backend
 ├── docker-compose.yml
 ├── build-plan.md     the full specification
