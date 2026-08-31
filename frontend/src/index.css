@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* One accent colour, defined once. Everything else is neutral grey, which is
+   what makes the accent mean something when it does appear. */
+@theme {
+  --color-accent: oklch(0.52 0.13 252);
+  --color-accent-strong: oklch(0.45 0.14 252);
+  --color-accent-soft: oklch(0.96 0.02 252);
+}

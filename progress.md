@@ -32,15 +32,18 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Hour 3 — the frontend
 
-- [ ] React and Vite project running
-- [ ] Tailwind configured
-- [ ] Natural-language add box
-- [ ] Interpretation shown as editable chips before saving
-- [ ] Confirm button saves via the validated endpoint
+- [x] Analytics endpoints: summary, categories, trend (listed in the build plan but
+      missed by hour 1, and needed before any chart can be drawn)
+- [x] React and Vite project running
+- [x] Tailwind configured
+- [x] Natural-language add box
+- [x] Interpretation shown as editable chips before saving
+- [x] Confirm button saves via the validated endpoint
 - [ ] Summary cards
 - [ ] Category pie chart
 - [ ] Three-month trend line
-- [ ] Recent expenses list, original currency shown when not EUR
+- [~] Recent expenses list, original currency shown when not EUR — a short list is in
+      place so that saving has a visible result; the full section comes with the charts
 
 ## Hour 4 — MCP and exchange rates
 

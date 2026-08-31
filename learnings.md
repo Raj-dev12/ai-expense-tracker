@@ -175,6 +175,44 @@ to the number 5 and only fall over later. TypeScript makes you label what kind o
 each value is, and warns you before you run the code. It catches a large share of bugs for
 very little effort, which is why we're using it everywhere.
 
+**JSX**
+The HTML-looking syntax inside our React files. It is not HTML — it compiles to ordinary
+function calls — which is why attributes have JavaScript names: `className` rather than
+`class`, `onChange` rather than `onchange`.
+
+**Props**
+The values passed into a component, written like HTML attributes. `<SuggestionReview
+suggestion={...} saving={false} />` hands that component everything it needs. A component
+that reads only its props is easy to reason about, because nothing outside it can change what
+it shows.
+
+**Hook (useState, useEffect)**
+A function beginning with `use` that gives a component a capability it would not otherwise
+have. `useState` remembers a value between redraws — what has been typed, whether a save is
+in progress. `useEffect` runs something after the component appears, which is how the recent
+list loads itself.
+
+**Controlled input**
+A text box whose contents live in React state rather than in the browser's own memory: the
+value comes from state, and typing updates that state. It is a little more code than letting
+the browser handle it, and it is what makes "correct the parser, then save what is on screen"
+straightforward — the values being saved are the same ones being displayed.
+
+**Dev server proxy**
+While developing, the page is served by Vite on port 5173 and the API lives on port 3000. Two
+different ports count as two different sites to a browser, which would normally block the
+requests. Rather than loosening that rule, Vite forwards anything starting `/api` to the
+backend, so the browser only ever sees one address. Caddy does the same job in production, so
+development and production behave alike.
+
+**Key (and why it resets a component)**
+React decides whether to reuse a component on screen or build a fresh one by looking at its
+position and its `key`. Same key, same component — including all the state it is holding.
+This matters whenever a component copies a prop into `useState`, because a `useState` initial
+value is only read the first time that component appears. Give it a key that changes and React
+treats it as a new component, which resets those fields. This is the documented way to reset a
+component's state, and it is the fix for the bug described in session 6.
+
 ---
 
 ## 5. Terms: the backend
@@ -354,6 +392,19 @@ number, so it produces the same 97 expenses every single time. Genuinely random 
 mean the charts looked different in every screenshot and no bug involving particular data
 could ever be reproduced.
 
+**Aggregate query (GROUP BY)**
+A query that collapses many rows into one number each. "Add up the euros for every category"
+is one row per category rather than one per expense. Doing this in the database rather than
+fetching everything and adding it up in JavaScript matters as soon as there is real data:
+the database reads the rows it already has on disk, while the alternative sends every expense
+across the network to be counted.
+
+**Bucketing**
+Putting rows into fixed time slots and summing each slot — here, one slot per week. The slots
+have to exist even when they are empty, which is why weeks with no spending are sent as zero
+rather than left out. A chart given a gap draws a straight line across it, which reads as
+steady spending during a week when there was none.
+
 ---
 
 ## 7. Terms: the AI part
@@ -471,6 +522,93 @@ a page that hangs. Ours is 15 seconds, after which the mock answers.
 Removing secrets from text before it is stored or displayed. Provider errors sometimes quote
 your key back at you, so the key is stripped from the message before it reaches a log — logs
 end up in screenshots and bug reports far more often than anyone plans for.
+
+**Decimal separator versus thousands separator**
+English writes one thousand two hundred and thirty-four euros fifty-six as `1,234.56`. Most of
+Europe writes the same amount `1.234,56`. Both characters do both jobs, so a parser has to work
+out which is which. The rule is about *grouping*, not about decimal places — a thousands
+separator always has exactly three digits after it, because separating thousands is the only
+thing it does:
+
+1. **Both `.` and `,` appear** — whichever comes last is the decimal separator. `1.234,56` and
+   `1,234.56` are both 1234.56.
+2. **One kind, appearing more than once** — it is grouping. `1.234.567` is 1234567.
+3. **One kind, appearing once** — grouping only if exactly three digits follow it and one to
+   three digits come before. So `1,200` and `100,000` are whole numbers, while `14,6`, `23,40`
+   and `1234,5` are decimals.
+
+`1,200` is genuinely ambiguous: it could be one euro twenty. Three-digit grouping is the
+overwhelmingly common meaning, so that is what the rule chooses — and the confirm step is
+there for what a rule cannot settle.
+
+Our first attempt asked a much narrower question: "are there exactly two digits after the
+comma?" That is a rule about money rather than about grouping, and it read `14,6` as 146.
+
+**Recognising a name without relying on capitals**
+People type "at k market" as readily as "at K-Market", so requiring a capital letter to spot a
+shop name recognises one and misses the other. The reliable signal is the preposition: "at",
+"from", "in" and "on" are followed by the thing being paid. So the words after one are
+collected until something that plainly is not part of a name — a number, a date word, a
+currency, punctuation, or another preposition. A leading "the" is skipped rather than treated
+as the end, so "at the corner shop" still finds one.
+
+Capitalisation is then used only for display, and only ever to add a capital, never to remove
+one: "k market" becomes "K Market" while "IKEA" is left alone. Where there is no preposition to
+anchor on, a capital letter is the only hint left and is used as a last resort — which is a
+hint, not a requirement.
+
+**The extraction ordering rule**
+The mock parser pulls four things out of one sentence: a date, an amount, a merchant and a
+category. The rule that keeps them from fighting is:
+
+> Each step finds the one thing it understands, reports the exact words it used, and those
+> words are removed before the next step runs. Steps run most-constrained first.
+
+The order is date, then amount and any currency beside it, then merchant, then a currency
+named on its own. The category is read from the whole sentence rather than the leftovers,
+because a category is a property of the sentence rather than a span of it — "coffee at k
+market" is a Restaurants expense whether or not "coffee" ends up in the shop name.
+
+*Why most-constrained first.* A looser rule will happily swallow text belonging to a stricter
+one, but never the reverse. `31,08,26` is a perfectly well-formed grouped number — 310826 — and
+also a perfectly well-formed date. Both rules are individually correct; only their order
+decides which wins. A date needs three numbers in a fixed shape with day and month in range,
+so it is the more constrained pattern and goes first. Once it is taken away, the amount rule
+cannot see those digits, and the question stops being a question.
+
+*Why removal matters more than the order.* Ordering alone is not enough. Before this rule
+existed, every step defended itself against the others: the merchant step refused any word
+containing a digit, any word that was a currency, and any word that was a weekday. Each guard
+was added to fix a real bug, and together they meant "at 7 eleven", "at euro shop" and "monday
+market" all found no shop at all — because the guards fired on text that another step had
+already claimed and was no longer using. Removing each match lets every step stop caring what
+the other steps do. The merchant step now has no idea what a currency is.
+
+*What is checked at the end instead.* Two things are still not names, and both are decided on
+the finished result rather than word by word, which is what lets "euro shop" through while
+still refusing "dollars": a single word that is exactly a currency, and anything with no
+letters in it.
+
+*The remaining ambiguity.* "coffee at lidl monday" reads Monday as part of the shop name,
+because no date was matched and so nothing consumed it. That is the honest cost of removing
+the weekday guard, it is far rarer than the bugs it fixed, and the confirm step is where it
+gets corrected.
+
+**Written dates, Finnish style**
+Finland writes dates day first: 31.8.2026. The parser accepts that shape with a dot, comma,
+slash or hyphen, and with a two- or four-digit year — `31.08.2026`, `31.8.26`, `31,08,26`,
+`31/08/26`, `31-08-26` — plus ISO `2026-07-14`, whose four-digit leading group cannot be a
+day and so is never ambiguous. The separator must be the same in both positions, so
+"31.08,26" is not a date. Two-digit years are read as 2000-something, the only reading that
+makes sense here.
+
+Position does not matter. A date at the start of a sentence and a date at the end are handled
+identically, because the date is removed wherever it sits and the remaining words are read
+afterwards — which is the ordering rule doing its job rather than a special case.
+
+A date that has not happened yet is refused rather than returned. The mock is allowed to guess
+wrong; it is not allowed to produce a value that its own validation will reject, because that
+turns a bad guess into a failed request.
 
 ---
 
@@ -679,6 +817,13 @@ want when someone asks you about the project in six months.
 | Claude model | `claude-opus-5`, overridable with `ANTHROPIC_MODEL` | The current default model. Reading one sentence is a small job, so the request also sets effort to low, which keeps it quick and cheap without changing the model. Anyone who wants to trade quality for cost changes one environment variable rather than any code. |
 | Provider failure | Any error, timeout or invalid reply falls back to the mock | A demo that degrades is better than a demo that breaks. The person still sees a suggestion, still corrects it, and still confirms it — the safety pattern is untouched, only the quality of the guess changes. |
 | Reported provider | The response names the parser that actually answered, not the one configured | On a fallback these differ. Reporting the configured provider would mean the API claimed Claude wrote a suggestion the mock produced, which is a small lie told on exactly the occasions when the truth matters most. |
+| Cross-origin requests | Vite's dev proxy forwards `/api` to the backend, rather than adding CORS headers | The browser only ever talks to one address, so the browser's same-origin rule is never relaxed and no dependency is needed. It also matches production, where Caddy forwards `/api` the same way — development and production behaving alike is worth more than the ten minutes it saved. |
+| Frontend validation | The backend's responses are checked with Zod in the browser too | A response from another program is an input from somewhere we do not control, the same as a request body is on the server. Without it, a backend change shows up as a blank page instead of a message. It also lets the page assert the parse endpoint's `saved: false` promise on every single call. |
+| Amounts in the browser | Kept as the strings the API sends, converted to numbers only for display | The decimal column exists so money stays exact; parsing every amount into a JavaScript number on arrival would undo that at the last step. |
+| Analytics windows | Summary is month-to-date and takes no parameters; the pie defaults to the same month; the trend defaults to the last fourteen weeks | The cards and the pie describe the same period, so the two cannot disagree with each other on screen. The trend is explicitly about change over time, so it needs a longer window. Both the pie and the trend still accept an explicit `from` and `to`. |
+| Empty weeks in the trend | Sent as zero points rather than left out | A missing week is not a gap in a line chart — it is a straight line drawn across it, which reads as steady spending during a week when there was none. Sending the zero is the only way the chart can tell the truth. |
+| Analytics totals | Strings, like every other amount | The database adds `numeric` columns exactly. Converting to a JavaScript number in the response would throw that away at the last step, after using a decimal column specifically to avoid it. The browser converts when it draws. |
+| Unknown query parameters | Rejected with a 400 rather than ignored | `?form=2026-08-01` is a typo, and silently ignoring it produces a chart that looks fine and answers a different question. This is the failure mode where someone stares at a filter wondering why it did nothing. |
 
 ---
 
@@ -1029,3 +1174,214 @@ the default and nothing about the confirm step changed.
 
 Hour 3: the frontend. One page, the add box, the interpretation shown as editable chips, and
 the charts.
+
+### Session 5 — hour 3 part one, the add box and the confirm step
+
+Stopped deliberately before the charts, so the most important interaction could be looked at
+on its own before anything else is built on top of it.
+
+**What got built**
+
+- A React and Vite project in TypeScript, with Tailwind 4 and one accent colour defined once
+  as a theme token.
+- The add box: type a sentence, press "Read this", and the parser's interpretation appears.
+- The confirm step. Six editable chips — amount, currency, merchant, category, date, note —
+  filled in with the parser's guesses, none of it saved until the button is pressed.
+- A short "recently added" list, so that saving has a visible consequence. The full version,
+  with the charts, comes next.
+
+**Decisions worth remembering**
+
+- A suggestion with no amount cannot be saved until a person types one. The parser returns
+  null rather than inventing a number, and the page holds that line rather than defaulting to
+  zero.
+- The confidence figure is shown small and grey and changes nothing, exactly as decided. The
+  person reading the screen is the threshold.
+
+**Verified**
+
+- Every component renders, checked by `npm run check` in the frontend — it renders the page
+  and the confirm step in Node and asserts the chips, buttons and messages are present.
+- The full sequence the page performs, run through the Vite proxy: load the list, parse a
+  sentence, confirm the count did not change, save a corrected version, see the list grow from
+  97 to 98, then remove the test row again.
+- Parsing "spent 30 quid at Tesco the day before yesterday" suggested Other; the category was
+  corrected to Groceries at the confirm step and 30 GBP was stored as 35.10 EUR.
+
+**Not verified**
+
+- How it actually looks. There were no browser tools available this session, so the layout,
+  spacing and colours have not been seen by anyone yet. That is the first thing to check.
+
+**Next**
+
+The rest of hour 3: summary cards, the category pie, the three-month trend, and the full
+recent list.
+
+### Session 6 — a bug in the confirm step
+
+Reported from the browser: after saving, the add box would not take another expense without a
+page refresh, though the save itself worked.
+
+**What was actually wrong**
+
+`SuggestionReview` copies the parser's guesses into its own state so they can be edited:
+
+```
+const [amount, setAmount] = useState(suggestion.amount?.toString() ?? "");
+```
+
+The value passed to `useState` is only read the first time a component appears. React decides
+whether a component is "the same one" by its position and its key, and since neither changed,
+a second parse handed the component new props while React kept the instance that was already
+on screen — so those initialisers never ran again and the chips kept the previous
+interpretation. The add box updated correctly, the request was sent correctly, the reply came
+back correctly, and the screen showed the old answer, which is exactly what "it ignored what I
+typed" looks like.
+
+The fix is one line: give the confirm step a `key` that changes on every parse, so React
+builds a fresh component and reads the new values. See [[key-and-why-it-resets-a-component]].
+
+**Worth remembering**
+
+- The state reset after saving was never the problem, even though that is what the symptom
+  pointed at. Reading the code found nothing because there was nothing there to find.
+- Two attempts to reproduce it failed before one worked, and both failures were the test's
+  fault rather than the app's: the first used a stubbed backend, which only ever proves the
+  stub agrees with the frontend; the second checked the page before the real request had
+  finished. A test that passes for the wrong reason is worse than no test.
+- One assertion passed while the bug was present, because it searched the whole page for the
+  merchant name and found it in the add box rather than in a chip. Assertions should look at
+  the one thing they are about.
+
+**Now checked automatically**
+
+`npm run cycle` in the frontend drives the real thing against the real backend: type, parse,
+correct, save, then a second expense with no refresh, then a third parsed without saving the
+one before it. It cleans up the rows it creates.
+
+### Session 7 — two bugs in the mock parser
+
+Both found by typing one sentence in the browser: "coffee and tea at k market 14,6". It read
+146 euros and found no shop.
+
+**What was wrong, and the rules that replaced the guesses**
+
+- The amount. The old code asked whether exactly two digits followed the comma, which is a
+  rule about money rather than about how numbers are written, so `23,40` worked and `14,6`
+  became 146. The replacement asks whether the separator is *grouping*, which is decided by
+  three-digit runs. See [[decimal-separator-versus-thousands-separator]] for the three cases.
+  `14,6`, `1,200`, `1.234,56` and `1,234.56` are now all read correctly.
+- The merchant. The old code required a capital letter after "at", so "at K-Market" was found
+  and "at k market" was not. The replacement anchors on the preposition and reads until a
+  boundary, ignoring capitalisation entirely.
+  See [[recognising-a-name-without-relying-on-capitals]].
+
+**Two things found while writing the tests**
+
+- Writing the rule out properly exposed a case neither bug report mentioned: "at the corner
+  shop" returned nothing, because "the" ended the name before it began. Leading articles are
+  now skipped rather than treated as a boundary.
+- A written date is full of digits, so "netflix on 2026-07-14" was at risk of being read as
+  2026 euros. Dates are now taken out of the sentence before the amount is looked for.
+
+**Now checked automatically**
+
+`npm test` in the backend, using Node's own test runner, so no test framework was added. 35
+tests: the whole separator table case by case, the reported sentence end to end, and the
+merchant rules including "same answer whatever the capitalisation".
+
+### Session 8 — three parser bugs, and the ordering rule that fixes them
+
+Reported from the browser, from two sentences: "s market chocolate 1600,789 on 31,08,26" and
+"31,08,26 mustafa doner 20 euros".
+
+**What was wrong**
+
+- `31,08,26` was read as the number 310826. The separator rule and the date rule are each
+  correct on their own; a comma-separated date is a well-formed grouped number. Nothing
+  decided which rule got to claim those characters first.
+- Neither sentence had a preposition, and the merchant step only looked after "at", "from",
+  "in" or "on" — or, failing that, for a capital letter. Both sentences are lowercase.
+- A future written date produced a 502. Nobody reported it; it was found while testing. The
+  mock returned a date its own validation then rejected.
+
+**One correction to the report.** In "31,08,26 mustafa doner 20 euros" the parser was not
+recognising the date and using it as the amount at the same time. It never recognised the date
+at all — `expenseDate` fell back to today, which happened to equal 31.08.26 on the day it was
+tried, so it only looked as though it had.
+
+**Why "s market" failed when "k market" worked** — nothing to do with single letters. "at k
+market" has a preposition in front of it; "s market chocolate ..." does not. "at s market"
+worked all along, and still does. The fix was a second way of finding a merchant, from the
+words no other step claimed, rather than anything about the letter.
+
+**What replaced it**
+
+The [[the-extraction-ordering-rule]], written up above, with the individual rules moved into
+`extract.ts` and the order itself left in `mock.ts` where it can be read as five numbered
+steps. See also [[written-dates-finnish-style]].
+
+**What it taught us**
+
+- Reordering the steps was not enough on its own, and the tests caught that. Three of them
+  still failed after the reorder, because the merchant step was still defending itself against
+  digits, currencies and weekdays — guards that only existed because it used to read text the
+  other steps had already claimed. The ordering rule is only worth having if the steps then
+  stop second-guessing each other.
+- Every one of those guards had been added to fix a real bug. That is how a parser accumulates
+  rules that each made sense at the time and collectively make no sense at all.
+- The fix removed code rather than adding it: the merchant step no longer knows what a
+  currency is.
+
+**Now checked automatically**
+
+`npm test` in the backend, 67 tests. The separator table case by case, every accepted date
+format, dates at the start, middle and end of a sentence, the three collision cases, both
+reported sentences, and the future-date refusal.
+
+### Session 9 — the analytics endpoints
+
+Found while working out what came next: `build-plan.md` lists three analytics endpoints, but
+hour 1's checklist only said "expenses CRUD", so they were never built and nothing noticed.
+The charts could not have been drawn without them.
+
+**What got built**
+
+- `GET /api/analytics/summary` — month to date: total, count, daily average, and the same
+  stretch of the previous month for comparison.
+- `GET /api/analytics/categories` — one figure per category, for the pie.
+- `GET /api/analytics/trend` — weekly totals, for the line.
+- Date helpers for month and week boundaries in `lib/dates.ts`, where every date decision
+  already lives.
+
+**Decisions worth remembering**
+
+- The previous-month comparison uses the same *number of days*, not the whole month.
+  Comparing the first three days of August against all of July would show spending collapsing
+  by ninety per cent every month — an artefact of the calendar rather than information. A
+  shorter previous month is clamped, so 31 March compares against all of February.
+- Weeks start on Monday, and `date_trunc('week', ...)` in PostgreSQL agrees, so the buckets
+  built in JavaScript line up exactly with the ones the database groups by. Two different
+  ideas of when a week starts would have been a quiet, hard-to-see error.
+- `changePercent` is null rather than zero when there is nothing to compare against. "No
+  change" and "nothing to compare" are different, and the page should be able to say which.
+
+**Verified**
+
+Rather than asserting fixed numbers — the seed moves with the date, so they change daily —
+the figures were checked against each other:
+
+- The summary total equals the raw expenses over the same window, to the cent.
+- The category slices add up to the summary total, and their counts add up too.
+- The trend points add up to the raw expenses over the trend window.
+- Every bucket starts on a Monday, and the weeks run continuously with no gaps.
+- The previous-month window is exactly as long as the elapsed part of this month.
+
+Also checked: typos and unknown parameters are rejected, a future `to` is refused, and a
+window with no expenses returns zeroes and an empty list rather than an error.
+
+**Next**
+
+The frontend half of hour 3: summary cards, the Recharts pie and trend line, and replacing
+the stub recent list with the real one.
