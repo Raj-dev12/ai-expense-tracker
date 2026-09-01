@@ -181,6 +181,20 @@ cd backend
 DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:migrate
 ```
 
+In PowerShell on Windows, environment variables are set on their own lines first:
+
+```powershell
+cd backend
+$env:DATABASE_URL = "<session pooler string>?sslmode=require"
+$env:DB_SSL = "require"
+npm run db:migrate
+Remove-Item Env:DATABASE_URL, Env:DB_SSL   # so the next local run is local again
+```
+
+A variable set in the shell wins over the same name in `.env` — `process.loadEnvFile` does
+not overwrite what is already there. That is what stops this from quietly migrating your
+local database while you watch a Supabase-shaped command scroll past.
+
 This is the same Drizzle migrator the Dockerfile runs, reading the same SQL files in
 `backend/src/db/migrations`. It records what it has applied, so running it again does nothing.
 Run it the same way after any future `npm run db:generate`.
@@ -189,6 +203,17 @@ Loading the demo data is separate, and **deletes every existing expense first**:
 
 ```bash
 ALLOW_SEED=true DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:seed
+```
+
+Or in PowerShell:
+
+```powershell
+cd backend
+$env:ALLOW_SEED = "true"
+$env:DATABASE_URL = "<session pooler string>?sslmode=require"
+$env:DB_SSL = "require"
+npm run db:seed
+Remove-Item Env:ALLOW_SEED, Env:DATABASE_URL, Env:DB_SSL
 ```
 
 Migrations are deliberately not wired into the Vercel build. A build runs on every deploy and
