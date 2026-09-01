@@ -135,14 +135,22 @@ are untouched.
 **The application code is identical in both.** `backend/src/app.ts` builds the Fastify app and
 registers the six route plugins. The only thing the two ways disagree about is who opens the
 port: `backend/src/index.ts` calls `listen()` and is what Docker runs, while
-`backend/api/[...path].ts` never listens at all and hands each request Vercel gives it to that
+`backend/api/index.ts` never listens at all and hands each request Vercel gives it to that
 same app. Not one route, schema or query differs between them.
+
+Every `/api` path reaches that one function because `backend/vercel.json` says so, with a
+rewrite from `/api/(.*)`. It is worth doing explicitly: naming the file `api/[...path].ts` and
+relying on a catch-all filename does not work here — that convention belongs to Next.js, and
+plain Vercel function routing reads the brackets as a single dynamic segment, so nested paths
+like `/api/analytics/summary` never arrive. A rewrite only chooses which function answers; the
+original URL is passed through untouched, which is what lets Fastify's router see exactly what
+it sees under Caddy.
 
 ### Vercel and Supabase
 
 ```
   browser ──▶ vercel project: frontend ──── /api/* ──▶ vercel project: backend ──▶ supabase
-              the built React app,          rewrite     api/[...path].ts,          postgres,
+              the built React app,          rewrite     api/index.ts,             postgres,
               served as static files                    one serverless function    via the
                     ▲                                        ▲                     pooler
                     │                                        │
@@ -598,7 +606,7 @@ reasonable ideas; all would make this a bigger project rather than a clearer one
 .
 ├── backend/          Fastify API — routes, Drizzle schema, AI adapters, FX
 │   ├── src/app.ts    builds the Fastify app; both ways of deploying start here
-│   ├── api/          the Vercel entry point — one file, never listens
+│   ├── api/index.ts  the Vercel entry point — one file, never listens
 │   ├── Dockerfile    multi-stage: compiles TypeScript, ships only the result
 │   └── vercel.json   build command and the function timeout
 ├── frontend/         React single page

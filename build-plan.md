@@ -223,7 +223,7 @@ and npm workspaces — was rejected because it moves both lockfiles to the repos
 breaks both Dockerfiles.
 
 The application code is unchanged. `backend/src/app.ts` builds the Fastify app;
-`backend/src/index.ts` opens a port and is what Docker runs; `backend/api/[...path].ts` opens
+`backend/src/index.ts` opens a port and is what Docker runs; `backend/api/index.ts` opens
 nothing and is what Vercel runs. No route, schema or query differs between them.
 
 Three things a serverless deployment forces:

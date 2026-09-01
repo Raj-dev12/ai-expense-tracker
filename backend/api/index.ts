@@ -9,10 +9,20 @@ import { buildApp } from "../dist/app.js";
  * and may shut it down again seconds later. That is the whole difference from
  * the Docker path, where index.ts opens a port and the process stays up.
  *
- * The square brackets in the filename are Vercel's routing convention: this one
- * file answers every path under /api/. Vercel passes the original URL through
- * untouched, so Fastify's router sees exactly what it sees under Caddy —
- * /api/expenses, /api/analytics/summary — and not one route had to change.
+ * **Every /api path reaches this one function, and it is vercel.json that says
+ * so, not this filename.** The first attempt called this file `[...path].ts`,
+ * borrowing the catch-all convention from Next.js. Vercel's plain function
+ * routing does not have that convention: it read the brackets as a single
+ * dynamic segment whose name happened to be "...path". One-segment paths worked
+ * by accident, `/api/analytics/summary` returned Vercel's own 404 without ever
+ * reaching Fastify, and every request arrived carrying an extra `...path` query
+ * parameter that the strict filter schemas correctly refused. An explicit
+ * rewrite is both clearer and actually correct.
+ *
+ * Vercel's rewrite only chooses which function answers; the original URL is
+ * passed through untouched. So Fastify's router sees exactly what it sees under
+ * Caddy — /api/expenses, /api/analytics/summary — and not one route had to
+ * change.
  *
  * It imports from ../dist rather than ../src deliberately. Vercel runs the same
  * `npm run build` the Dockerfile runs, so both ways of deploying execute

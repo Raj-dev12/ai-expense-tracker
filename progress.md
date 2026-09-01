@@ -152,7 +152,7 @@ same `Caddyfile`, still the way the project is meant to be read.
 
 - [x] `backend/src/app.ts` — `buildApp()` split out of `index.ts`, so the app is built in one
       place and only the last three lines of `index.ts` know about opening a port
-- [x] `backend/api/[...path].ts` — one serverless function answering every `/api/` path,
+- [x] `backend/api/index.ts` — one serverless function answering every `/api/` path,
       handing each request straight to that same app. No route, schema or query changed
 - [x] `DB_POOL_MAX` and `DB_SSL` added to the environment schema and used by the pool, plus a
       10-second connection timeout so a function cannot burn its whole budget waiting
@@ -172,9 +172,22 @@ same `Caddyfile`, still the way the project is meant to be read.
 - [x] `README.md` has a "Deploying it: two ways" section with the full Supabase and Vercel
       walkthrough; `learnings.md` gained ten terms and nine decision rows; `.env.example` and
       `build-plan.md` record the addition
-- [ ] Supabase project created, migrations applied to it
-- [ ] Both Vercel projects deployed, and `frontend/vercel.json` pointed at the real backend
-      address — it currently holds a placeholder
+- [x] Supabase project created (Central EU, Frankfurt), migrations applied from a laptop
+      against the session pooler, seeded with 93 expenses
+- [x] Backend deployed: `ai-expense-tracker-rho-silk.vercel.app`, `/api/health` reporting the
+      database reachable through the transaction pooler
+- [x] `TZ` dropped from the Vercel variables — Vercel reserves the name, and nothing has ever
+      read it. `lib/dates.ts` names the zone explicitly, which `/api/health` confirms
+- [x] Fixed after probing the live deployment: `api/[...path].ts` was borrowing Next.js's
+      catch-all convention, which plain Vercel routing does not have. It read the brackets as
+      one dynamic segment called `...path`, so `/api/health` worked by accident,
+      `/api/analytics/summary` never reached Fastify at all, and every request carried a stray
+      `...path` query parameter that the strict filter schemas refused. Now `api/index.ts`
+      with an explicit `/api/(.*)` rewrite. Verified locally on nested paths before pushing
+- [x] `frontend/vercel.json` points at the backend's production domain — the stable one, not
+      the per-deployment URL, which carries a hash that changes on every deploy and would have
+      pinned the frontend to one old backend while still looking healthy
+- [ ] Frontend imported as a second Vercel project, root directory `frontend`
 - [ ] `BACKEND_URL` in `.env` switched to the deployed address and the MCP server retried
       against it
 
