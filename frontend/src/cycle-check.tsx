@@ -85,6 +85,23 @@ function buttonLabelled(text: string): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined;
 }
 
+/**
+ * Whether the confirm step is on screen.
+ *
+ * This used to count `<form>` elements and expect two — one for the add box,
+ * one for the confirm step. That was true when the page had a single form on
+ * it, and quietly stopped being true when the query box and the categories
+ * panel arrived with forms of their own. The count could then never be two, so
+ * three checks in this file had been failing on every run while asserting
+ * nothing about the thing they were named after.
+ *
+ * Asking for the Save expense button instead names the step directly, and does
+ * not move when something unrelated grows another form.
+ */
+function confirmStepIsOpen(): boolean {
+  return buttonLabelled("Save expense") !== undefined;
+}
+
 async function pressReadThis() {
   const button = buttonLabelled("Read this");
   if (!button) throw new Error("the Read this button is not on screen");
@@ -129,11 +146,11 @@ function chip(index: number): string {
 // ---- first trip round the loop ----
 await type("spent 42 euros at Lidl yesterday");
 await pressReadThis();
-report("1st parse shows the confirm step", container.querySelectorAll("form").length === 2);
+report("1st parse shows the confirm step", confirmStepIsOpen());
 report("1st parse filled the chips", chip(0) === "42", chipValues());
 
 await pressSave();
-report("1st save cleared the confirm step", container.querySelectorAll("form").length === 1);
+report("1st save cleared the confirm step", !confirmStepIsOpen());
 report("1st save cleared the add box", addBox().value === "", `add box = "${addBox().value}"`);
 report("1st save reported success", container.textContent!.includes("Saved"));
 
@@ -143,7 +160,7 @@ report("add box accepted new text", addBox().value === "bought 55 euros of food 
   `add box = "${addBox().value}"`);
 
 await pressReadThis();
-report("2nd parse shows the confirm step", container.querySelectorAll("form").length === 2);
+report("2nd parse shows the confirm step", confirmStepIsOpen());
 
 const values = chipValues();
 report("2nd parse shows the NEW amount (55, not 42)", chip(0) === "55", values);

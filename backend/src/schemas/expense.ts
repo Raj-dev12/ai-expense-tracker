@@ -142,7 +142,27 @@ export type UpdateExpenseInput = z.infer<typeof updateExpenseSchema>;
 export const listExpensesQuerySchema = z.strictObject({
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
-  category: categorySchema.optional(),
+  /**
+   * Categories to filter by. Repeat the key to name several:
+   * `?category=Health&category=Transport`.
+   *
+   * It became a list because the pie folds its smallest categories into one
+   * slice, and clicking that slice has to ask for exactly the set it drew. It
+   * used to ask for the literal name "Other", which is also a real category —
+   * so the tooltip described five categories and the panel below it listed one,
+   * and the two disagreed about the same slice.
+   *
+   * A repeated key rather than a comma-separated string: category names are
+   * free text and a delimiter inside one would split it in half. Fastify hands
+   * a repeated key over as an array and a single one as a string, so the shape
+   * is normalised here rather than in the route.
+   */
+  category: z
+    .preprocess(
+      (value) => (Array.isArray(value) ? value : [value]),
+      z.array(categorySchema).min(1).max(20),
+    )
+    .optional(),
   minAmount: z.coerce.number().nonnegative().optional(),
   // Free text, matched against the merchant and the description. Kept here
   // rather than in the MCP server so that searching means the same thing

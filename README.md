@@ -554,6 +554,7 @@ cd mcp && npm install && npm run build
 GET    /api/health
 POST   /api/expenses
 GET    /api/expenses            from, to, category, minAmount, search, limit, offset
+                                category repeats to name several: &category=A&category=B
                                 the day view is this, with from and to set to the same date
 GET    /api/expenses/:id
 PATCH  /api/expenses/:id      change any field; omitted fields are left alone

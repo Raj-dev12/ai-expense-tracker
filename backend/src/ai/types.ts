@@ -1,3 +1,4 @@
+import type { Baseline } from "../lib/baseline.js";
 import type { CategoryName } from "../lib/categories.js";
 
 export const AI_PROVIDER_NAMES = ["mock", "claude", "openai"] as const;
@@ -58,6 +59,13 @@ export type MonthlySummaryRequest = {
   expenseCount: number;
   byCategory: ReadonlyArray<{ category: string; totalBase: number }>;
   previousTotalBase: number | null;
+  /**
+   * Whether the stretch before is worth comparing against at all, and why not
+   * when it is not. "empty" means nothing was recorded then; "too-small" means
+   * something was, but too little for a percentage to describe anything but the
+   * accident of a single purchase landing inside the window.
+   */
+  baseline: Baseline;
 };
 
 /**

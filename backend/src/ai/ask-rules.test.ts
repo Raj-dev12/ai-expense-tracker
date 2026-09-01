@@ -232,3 +232,105 @@ test("dates the rules do understand", async (t) => {
     assert.equal(q.kind === "aggregate" && q.filters.from, "2026-08-31");
   });
 });
+
+test("half a question is never answered silently", async (t) => {
+  /*
+    The reported failure. Every existing guard passed it: every word is known,
+    the category and the date both matched, nothing was left unread. It then
+    answered the amount and dropped "where" without a word — a correct number
+    answering half of what was asked, which is the same failure as answering
+    "why did I spend so much on food" with a figure.
+
+    The whitelist could not see it. "Where" is a perfectly known word; it is not
+    an unrecognised subject but an unrecognised *ask*, and only counting the
+    asks finds it.
+  */
+  await t.test("the reported compound question is refused, not half-answered", () => {
+    const question = read("how much did I spend on restaurants today and where did I spend it");
+    assert.equal(question.kind, "unsupported");
+    if (question.kind !== "unsupported") return;
+    assert.match(question.reason, /two things/);
+  });
+
+  await t.test("the refusal names both parts, so neither looks answered", () => {
+    const question = read("how much did I spend on restaurants today and where did I spend it");
+    if (question.kind !== "unsupported") throw new Error("expected a refusal");
+    assert.match(question.reason, /"how much"/);
+    assert.match(question.reason, /"where"/);
+  });
+
+  await t.test("other compounds are caught the same way", () => {
+    for (const question of [
+      "how many expenses and how much did I spend",
+      "when did I spend the most and where",
+      "which category and which shop did I spend most at",
+    ]) {
+      assert.equal(read(question).kind, "unsupported", question);
+    }
+  });
+
+  /*
+    The half that must keep working. A grouping plus a measure is one ask, not
+    two — "spend" in "which month did I spend most" supplies the measure for
+    "which month" rather than starting a second question. Counting any question
+    word rather than interrogative heads would have refused all of these.
+  */
+  await t.test("a grouping with a measure is still one question", () => {
+    for (const question of [
+      "which month did I spend most on restaurants",
+      "highest week for groceries",
+      "what is my highest expense",
+      "which shop did I spend the most at",
+      "how much did I spend on restaurants today",
+    ]) {
+      assert.notEqual(read(question).kind, "unsupported", question);
+    }
+  });
+});
+
+test("asks that were known words but no shape read", async (t) => {
+  /*
+    "Where" and "when" were in the whitelist, so they passed the constraint
+    guard, and no branch looked at them — "where did I spend the most" fell
+    through to a plain total. That is the same silent half-answer as the
+    compound case, reached by a different route, so they are answered rather
+    than merely tolerated.
+  */
+  await t.test("where is a question about shops", () => {
+    const question = read("where did I spend the most this month");
+    assert.equal(question.kind, "topBuckets");
+    if (question.kind !== "topBuckets") return;
+    assert.equal(question.bucket, "merchant");
+  });
+
+  await t.test("when is a question about days", () => {
+    const question = read("when did I spend the most this month");
+    assert.equal(question.kind, "topBuckets");
+    if (question.kind !== "topBuckets") return;
+    assert.equal(question.bucket, "day");
+  });
+
+  /*
+    And the misread this uncovered: "this month" had already been read as the
+    date range, then read a second time as a grouping. "Where did I spend the
+    most this month" came back as the highest *month* — a real figure answering
+    a question about shops.
+  */
+  await t.test("a period phrase is the window, not the grouping", () => {
+    const where = read("where did I spend the most this month");
+    if (where.kind !== "topBuckets") throw new Error("expected buckets");
+    assert.equal(where.bucket, "merchant");
+
+    const counted = read("how many expenses this month");
+    assert.equal(counted.kind, "aggregate");
+    if (counted.kind !== "aggregate") return;
+    assert.equal(counted.measure, "count");
+  });
+
+  await t.test("a grouping word without a period phrase still groups", () => {
+    const question = read("which month did I spend most on restaurants");
+    assert.equal(question.kind, "topBuckets");
+    if (question.kind !== "topBuckets") return;
+    assert.equal(question.bucket, "month");
+  });
+});

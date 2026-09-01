@@ -34,7 +34,7 @@ import { windowFor, type Period } from "./periods";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
-import { CategoryPie } from "./components/CategoryPie";
+import { CategoryPie, type PieSlice } from "./components/CategoryPie";
 import { DayView } from "./components/DayView";
 import { AnalysisCard } from "./components/AnalysisCard";
 import { RecentExpenses } from "./components/RecentExpenses";
@@ -178,7 +178,15 @@ export default function App() {
    * same window the pie is drawing so the panel can never describe a different
    * period from the chart above it.
    */
-  const [pieCategory, setPieCategory] = useState<string | null>(null);
+  /**
+   * The pie slice whose expenses are open, held whole rather than by name.
+   *
+   * A folded slice stands for several categories, and the panel has to ask for
+   * exactly that set. Holding only the name meant asking for the literal
+   * category "Other" — which exists — so the panel listed one expense under a
+   * tooltip describing five.
+   */
+  const [pieSlice, setPieSlice] = useState<PieSlice | null>(null);
   const [pieExpenses, setPieExpenses] = useState<Expense[]>([]);
   const [pieLoading, setPieLoading] = useState(false);
 
@@ -244,7 +252,7 @@ export default function App() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!pieCategory || !categories) return;
+    if (!pieSlice || !categories) return;
 
     let cancelled = false;
     setPieLoading(true);
@@ -252,7 +260,7 @@ export default function App() {
     listExpenses({
       from: categories.from,
       to: categories.to,
-      category: pieCategory,
+      categories: pieSlice.members,
       limit: EXPENSE_LIMIT,
     })
       .then((result) => {
@@ -268,7 +276,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [pieCategory, categories, writes]);
+  }, [pieSlice, categories, writes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -480,7 +488,7 @@ export default function App() {
 
   // Stable identity, so the pie's outside-click effect is not torn down and
   // rebuilt on every render of the page.
-  const dismissPieCategory = useCallback(() => setPieCategory(null), []);
+  const dismissPieCategory = useCallback(() => setPieSlice(null), []);
 
   function handlePeriodChange(next: Period) {
     setPeriod(next);
@@ -489,7 +497,7 @@ export default function App() {
     // to summarise something it never looked at.
     setMonthly(null);
     setMonthlyAt(null);
-    setPieCategory(null);
+    setPieSlice(null);
     // The answer was computed over the old period, so it would be describing a
     // stretch of time the card no longer shows.
     setAnswer(null);
@@ -651,10 +659,10 @@ export default function App() {
                   categories={categories.categories}
                   from={categories.from}
                   currency={currency}
-                  selected={pieCategory}
+                  selected={pieSlice}
                   selectedExpenses={pieExpenses}
                   selectedLoading={pieLoading}
-                  onSelect={setPieCategory}
+                  onSelect={setPieSlice}
                   onDismiss={dismissPieCategory}
                 />
               )}

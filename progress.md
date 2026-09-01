@@ -191,6 +191,61 @@ same `Caddyfile`, still the way the project is meant to be read.
 - [ ] `BACKEND_URL` in `.env` switched to the deployed address and the MCP server retried
       against it
 
+
+## After deployment — three reports from the live app
+
+Found by using it, not by testing it. Each was investigated before anything was changed.
+
+- [x] **The pie's tooltip and its click-through disagreed about the same slice.** Hovering the
+      folded slice said €116.60 across 5 expenses; clicking it listed one, a €38.49 Posti
+      expense. The fold collapses everything past the fifth category into one slice, and that
+      slice carried only the name `Other` — which is also a real category — so the panel
+      filtered on the literal name. Confirmed against the live API before touching anything:
+      the five folded categories sum to exactly €116.60, and `?category=Other` returns exactly
+      the one Posti row
+- [x] The same bug explained the second report: `Restaurants` had no slice on the chart while
+      the query box still answered questions about it by name. It was inside the folded slice,
+      unnamed
+- [x] A slice now carries `members`, the categories it stands for. `GET /api/expenses` takes a
+      repeated `category` key so the panel asks for exactly that set — in the backend rather
+      than filtering in the browser, so there is one definition of what "in these categories"
+      means
+- [x] A folded slice is labelled as a group, `Other · 5 categories`, and writes its members out
+      in the legend and the tooltip, so a real category can no longer vanish from the chart
+- [x] Checks that pin the seam: the group's total and count must equal its members', the panel
+      must ask for every one of them, and by repeated key rather than a joined string. The
+      existing checks all tested the fold's arithmetic and all passed while the chart and the
+      panel disagreed — the bug lived between two things that were each correct
+- [x] **"That is 2586% more than the stretch before it."** On the 1st of a month the period is
+      one day and the stretch before it is one day, so the percentage described whether a
+      single purchase happened to land inside the window. Not capped — a cap still answers a
+      question that should not have been asked. `lib/baseline.ts` decides whether the baseline
+      is a sample at all, and fewer than three expenses is not one
+- [x] "Nothing recorded then" and "too little to compare" are now different sentences on the
+      card and in the written summary, rather than one dash meaning either. The real-provider
+      prompt is told the same rule, and told never to leave the comparison out silently
+- [x] **A compound question was half-answered.** "How much did I spend on restaurants today and
+      where did I spend it" returned the amount and dropped "where" without a word. It passed
+      every existing guard: every word known, category and date both matched, nothing unread.
+      `unreadWords` guards against dropping a *constraint*; this was an unrecognised *ask*,
+      which the whitelist cannot see because "where" is a perfectly known word
+- [x] `asksIn()` counts the interrogative heads before a shape is chosen. Two or more and the
+      question is refused with both named, so neither part can look answered. Keyed on heads
+      rather than question words, so "which month did I spend most on restaurants" is still one
+      question rather than two
+- [x] `where` and `when` now answer — by shop and by day. Both were known words no shape read,
+      so "where did I spend the most" had been quietly becoming a plain total
+- [x] Found while fixing that: a period phrase was being read twice. "Where did I spend the most
+      this month" grouped by *month* and answered with the highest month, having been asked
+      about shops. The matched window is removed before the grouping is chosen
+- [x] Found while verifying: `npm run cycle` had three checks that could never pass. They
+      counted `<form>` elements and expected two, which was true when the page had one form and
+      stopped being true when the query box and the categories panel arrived. They now ask for
+      the Save expense button by name
+- [x] Verified: 133 backend tests, all frontend checks, the full cycle check, all seven MCP
+      tools, and the folded set confirmed end to end against a real database — tooltip €116.60
+      across 5, click-through €116.60 across 5
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

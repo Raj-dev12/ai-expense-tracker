@@ -98,6 +98,43 @@ const KNOWN_WORDS = new Set([
   ...MONTHS,
 ]);
 
+/**
+ * The distinct things a question asks *for*, as opposed to what it filters on.
+ *
+ * `unreadWords` below is the guard against silently dropping a **constraint** —
+ * a subject or a date nobody read. This is the guard against silently dropping
+ * an **ask**, which turned out to be a different hole in the same wall.
+ *
+ * "How much did I spend on restaurants today and where did I spend it" walked
+ * straight through every existing check: every word in it is known, the category
+ * and the date both matched, and nothing was left unread. It then chose the
+ * first shape that fitted, answered the amount, and dropped "where" without a
+ * word. A correct number answering half a question is the same failure as "why
+ * did I spend so much on food" — it looks like an answer, and it is not one.
+ *
+ * The whitelist could not catch this because "where" is a perfectly known word.
+ * It is not an unrecognised subject; it is an unrecognised *ask*, and the only
+ * way to see it is to count the asks rather than the words.
+ *
+ * Deliberately keyed on interrogative heads rather than on any question word.
+ * "Which month did I spend most on restaurants" is one ask with a grouping and a
+ * measure, not two — "spend" there supplies the measure for "which month". Only
+ * a head starts a new question.
+ */
+const ASKS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: "how much", pattern: /\bhow much\b/i },
+  { name: "how many", pattern: /\b(?:how many|number of)\b/i },
+  { name: "where", pattern: /\b(?:where|(?:which|what)\s+(?:shop|store|merchant|place)s?)\b/i },
+  { name: "when", pattern: /\b(?:when|(?:which|what)\s+(?:day|week|month|year)s?)\b/i },
+  { name: "which category", pattern: /\b(?:which|what)\s+categor(?:y|ies)\b/i },
+  { name: "who", pattern: /\bwho\b/i },
+];
+
+/** Every distinct ask in a sentence, in the order they are listed above. */
+export function asksIn(text: string): string[] {
+  return ASKS.filter((ask) => ask.pattern.test(text)).map((ask) => ask.name);
+}
+
 /** Something typed into the wrong box: a figure, with nothing asked. */
 function hasNumber(text: string): boolean {
   return /\d/.test(text);
@@ -208,6 +245,23 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
     return unsupported("That does not read as a question about your spending.");
   }
 
+  // 3. Never silently answer half a question. Counted before a shape is chosen,
+  //    for the same reason the constraint guard is: so there is no branch it can
+  //    be forgotten on.
+  //
+  //    Both parts here are things this can answer on their own — it is the pair
+  //    it cannot do, because one query returns one figure. Refusing and naming
+  //    both is the honest version; answering the first and staying quiet about
+  //    the second is not.
+  const asks = asksIn(text);
+  if (asks.length > 1) {
+    const named = asks.map((ask) => `"${ask}"`).join(" and ");
+    return unsupported(
+      `That asks ${asks.length === 2 ? "two things" : `${asks.length} things`} at once — ${named} — ` +
+        "and I answer one at a time. I have not guessed at either. Ask them separately.",
+    );
+  }
+
   const order = LOWEST.test(text) ? "lowest" : "highest";
   const measure = COUNT.test(text) ? "count" : AVERAGE.test(text) ? "average" : "total";
 
@@ -215,7 +269,7 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
   const merchant = findMerchant(text);
   const window = findWindow(text, request.today);
 
-  // 3. Never silently drop a constraint. One check, before any shape is chosen,
+  // 4. Never silently drop a constraint. One check, before any shape is chosen,
   //    so there is no fourth branch for it to be forgotten on.
   const unread = unreadWords(text, { category, merchant });
   if (unread.length > 0) {
@@ -232,16 +286,34 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
     to: window?.to ?? null,
   };
 
-  // 4. Grouped into buckets, when the sentence names one.
-  const bucket = /\bweeks?\b/i.test(text)
+  // 5. Grouped into buckets, when the sentence names one.
+  //
+  //    "where" and "when" belong here. They were known words that no shape ever
+  //    read, so "where did I spend the most" quietly became a plain total — the
+  //    same silent half-answer as the compound case above, arriving by a
+  //    different route. "Where" is a question about shops and "when" is a
+  //    question about days, and saying so is what makes them answerable rather
+  //    than merely tolerated.
+  //
+  //    The period phrase is removed first. It has already been read as a date
+  //    range by findWindow, and leaving it in meant reading it a second time as
+  //    a grouping: "where did I spend the most this month" grouped by *month*
+  //    and answered with the highest month, having been asked about shops. A
+  //    word cannot be both the window and the bucket, and the window is the
+  //    reading that already happened.
+  const grouping = text
+    .replace(/\b(?:this|last|next|past)\s+(?:day|week|month|quarter|year)s?\b/gi, " ")
+    .replace(/\b(?:today|yesterday)\b/gi, " ");
+
+  const bucket = /\bweeks?\b/i.test(grouping)
     ? "week"
-    : /\bmonths?\b/i.test(text)
+    : /\bmonths?\b/i.test(grouping)
       ? "month"
-      : /\bdays?\b/i.test(text) || /\bbusiest\b/i.test(text)
+      : /\b(?:days?|busiest|when)\b/i.test(grouping)
         ? "day"
-        : /\bcategor/i.test(text)
+        : /\bcategor/i.test(grouping)
           ? "category"
-          : /\b(shops?|stores?|merchants?|places?)\b/i.test(text)
+          : /\b(?:shops?|stores?|merchants?|places?|where)\b/i.test(grouping)
             ? "merchant"
             : null;
 
@@ -249,12 +321,12 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
     return { kind: "topBuckets", bucket, measure, order, limit: 1, filters };
   }
 
-  // 5. Individual expenses, ranked.
+  // 6. Individual expenses, ranked.
   if (/\bexpenses?\b/i.test(text) && (HIGHEST.test(text) || LOWEST.test(text))) {
     return { kind: "topExpenses", order, limit: 1, filters };
   }
 
-  // 6. A plain total, count or average.
+  // 7. A plain total, count or average.
   if (/\b(how much|how many|total|average|mean|spend|spent)\b/i.test(text)) {
     return { kind: "aggregate", measure, filters };
   }

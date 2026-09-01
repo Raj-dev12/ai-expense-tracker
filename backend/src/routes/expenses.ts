@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses, type ExpenseRow } from "../db/schema.js";
@@ -110,8 +110,12 @@ export const expenseRoutes: FastifyPluginAsync = async (app) => {
     if (query.to) filters.push(lte(expenses.expenseDate, query.to));
     // Resolved rather than trusted, so a filter naming a category that does not
     // exist says so instead of quietly returning nothing — which reads as "you
-    // spent nothing on that" rather than "there is no such category".
-    if (query.category) filters.push(eq(expenses.category, await resolveCategory(query.category)));
+    // spent nothing on that" rather than "there is no such category". Every
+    // name in the list is checked, so one bad name in five is still refused.
+    if (query.category) {
+      const resolved = await Promise.all(query.category.map(resolveCategory));
+      filters.push(inArray(expenses.category, resolved));
+    }
     if (query.search) {
       // The escaping moved to lib/sql.ts when the question executor needed the
       // same rule. It has been wrong once already, so it exists in one place.

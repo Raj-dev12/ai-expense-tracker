@@ -5,6 +5,7 @@ import { expenses } from "../db/schema.js";
 import { HttpError } from "./http-error.js";
 import { toMoneyString } from "./money.js";
 import { addDays, daysBetween, startOfMonth, todayIso } from "./dates.js";
+import { baselineFor } from "./baseline.js";
 
 /**
  * The month's numbers, worked out in exactly one place.
@@ -146,6 +147,7 @@ export async function periodFigures(userId: string, from: string, to: string) {
 
   const currentTotal = Number(current.total);
   const previousTotal = Number(previous.total);
+  const baseline = baselineFor(previous.count, previousTotal);
 
   return {
     from,
@@ -160,11 +162,15 @@ export async function periodFigures(userId: string, from: string, to: string) {
       totalBase: previous.total,
       count: previous.count,
     },
-    // Null rather than zero or Infinity when there is nothing to compare with:
-    // "no change" and "nothing to compare" are different things, and the page
-    // should be able to say so.
+    // Whether the stretch before is enough of a sample to compare against, and
+    // why not when it is not. Worked out in lib/baseline.ts so the rule exists
+    // once and can be tested without a database.
+    baseline,
+    // Null rather than zero or Infinity when there is nothing worth comparing
+    // with: "no change", "nothing to compare" and "not enough to compare" are
+    // three different things, and the page should be able to say which.
     changePercent:
-      previousTotal > 0
+      baseline === "usable"
         ? Math.round(((currentTotal - previousTotal) / previousTotal) * 1000) / 10
         : null,
   };

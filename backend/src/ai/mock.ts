@@ -96,7 +96,7 @@ export const mockParser: ExpenseParser = {
   },
 
   async summarizeMonth(request: MonthlySummaryRequest): Promise<MonthlySummaryResult> {
-    const { month, baseCurrency, totalBase, expenseCount, byCategory, previousTotalBase } =
+    const { month, baseCurrency, totalBase, expenseCount, byCategory, previousTotalBase, baseline } =
       request;
 
     if (expenseCount === 0) {
@@ -118,7 +118,15 @@ export const mockParser: ExpenseParser = {
       );
     }
 
-    if (previousTotalBase !== null && previousTotalBase > 0) {
+    /**
+     * The comparison, or a plain statement that there is not one.
+     *
+     * Going silent when the baseline is unusable would be the wrong fix: a
+     * reader who saw a comparison last week and none this week cannot tell
+     * whether the figure is missing or the spending is identical. Saying which
+     * silence this is costs one sentence.
+     */
+    if (baseline === "usable" && previousTotalBase !== null && previousTotalBase > 0) {
       const difference = totalBase - previousTotalBase;
       const percent = Math.abs(Math.round((difference / previousTotalBase) * 100));
       sentences.push(
@@ -126,8 +134,13 @@ export const mockParser: ExpenseParser = {
           ? `That is ${percent}% more than the stretch before it.`
           : `That is ${percent}% less than the stretch before it.`,
       );
+    } else if (baseline === "empty") {
+      sentences.push("There is nothing in the stretch before it to compare against.");
+    } else {
+      sentences.push(
+        "There is too little in the stretch before it for a comparison to mean anything.",
+      );
     }
-
     return { summary: sentences.join(" "), producedBy: "mock" };
   },
 

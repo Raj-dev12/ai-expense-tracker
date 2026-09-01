@@ -198,8 +198,12 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
         category: row.category,
         totalBase: Number(row.totalBase),
       })),
+      // Null unless the stretch before is actually worth comparing against.
+      // The reason travels alongside it, so the sentence can say which of the
+      // two silences this is rather than simply omitting the comparison.
       previousTotalBase:
-        figures.previous.count > 0 ? Number(figures.previous.totalBase) : null,
+        figures.baseline === "usable" ? Number(figures.previous.totalBase) : null,
+      baseline: figures.baseline,
     });
 
     const checked = monthlySummaryResultSchema.safeParse(result);

@@ -63,11 +63,25 @@ export function SummaryCards({
    * the interface drawing a conclusion the data does not support. An arrow and a
    * plain sentence say what happened and leave the judgement to the reader.
    */
+  /**
+   * Three outcomes, not two.
+   *
+   * A percentage needs a baseline worth measuring against. On the 1st of a
+   * month this period is one day and the stretch before it is one day, and a
+   * quiet day before a normal one produced "2586% more" — correct arithmetic
+   * describing nothing but whether a single purchase happened to land inside
+   * the window. The backend decides whether the baseline is usable and says why
+   * it is not; this only has to report which of the two silences it is, because
+   * "nothing was recorded then" and "too little was" are different facts and a
+   * bare dash says neither.
+   */
   const change = summary.changePercent;
   const comparison =
-    change === null
-      ? `Nothing recorded in ${before}`
-      : `${change >= 0 ? "↑" : "↓"} ${Math.abs(change)}% against ${before}`;
+    change !== null
+      ? `${change >= 0 ? "↑" : "↓"} ${Math.abs(change)}% against ${before}`
+      : summary.baseline === "empty"
+        ? `Nothing recorded in ${before}`
+        : `Too little in ${before} to compare`;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

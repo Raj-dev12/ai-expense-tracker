@@ -19,14 +19,14 @@
  * that caused that bug. Treat them as a tripwire, not as proof.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { createCategory, deleteCategory, deleteExpense } from "./api";
+import { createCategory, deleteCategory, deleteExpense, listExpenses } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
 import { windowFor } from "./periods";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
-import { CategoryPie, foldToSixSlices } from "./components/CategoryPie";
+import { CategoryPie, foldToSixSlices, isGroup } from "./components/CategoryPie";
 import { DayView } from "./components/DayView";
 import { buildPatch } from "./components/ExpenseEditor";
 import { AnalysisCard } from "./components/AnalysisCard";
@@ -98,6 +98,7 @@ const summary: Summary = {
   totalBase: "1836.95", count: 31, dailyAverageBase: "59.26",
   previous: { from: "2026-07-01", to: "2026-07-31", totalBase: "1975.22", count: 36 },
   changePercent: -7,
+  baseline: "usable",
 };
 const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" period="month" />);
 check("card: month total", cards.includes("1,836.95"), cards.slice(0, 0));
@@ -122,6 +123,7 @@ const quarterCards = renderToStaticMarkup(
       totalBase: "3837.02", count: 64, dailyAverageBase: "61.89",
       previous: { from: "2026-04-30", to: "2026-06-30", totalBase: "1422.26", count: 31 },
       changePercent: 169.8,
+      baseline: "usable",
     }}
     currency="EUR"
     period="quarter"
@@ -136,8 +138,9 @@ const dayCards = renderToStaticMarkup(
     summary={{
       from: "2026-08-31", to: "2026-08-31", daysElapsed: 1,
       totalBase: "56.00", count: 1, dailyAverageBase: "56.00",
-      previous: { from: "2026-08-30", to: "2026-08-30", totalBase: "200.00", count: 1 },
+      previous: { from: "2026-08-30", to: "2026-08-30", totalBase: "200.00", count: 4 },
       changePercent: -72,
+      baseline: "usable",
     }}
     currency="EUR"
     period="day"
@@ -147,11 +150,37 @@ check("card: one day is singular", dayCards.includes("1 day so far") && !dayCard
 check("card: today reads as today", dayCards.includes("Spent today"));
 
 const noComparison = renderToStaticMarkup(
-  <SummaryCards summary={{ ...summary, changePercent: null }} currency="EUR" period="month" />,
+  <SummaryCards
+    summary={{ ...summary, changePercent: null, baseline: "empty" }}
+    currency="EUR"
+    period="month"
+  />,
 );
 check(
   "card: nothing to compare is said, not shown as zero",
   noComparison.includes("Nothing recorded in") && !noComparison.includes("0%"),
+);
+
+/*
+  A baseline too small to compare against is a third outcome, not the same as an
+  empty one. On the 1st of a month this period is one day and the stretch before
+  it is one day, and a quiet day before a normal one produced "2586% more" —
+  correct arithmetic describing nothing but whether a single purchase happened to
+  land inside the window. The card must say which silence it is; a bare dash says
+  neither, and a percentage says something false.
+*/
+const thinBaseline = renderToStaticMarkup(
+  <SummaryCards
+    summary={{ ...summary, changePercent: null, baseline: "too-small" }}
+    currency="EUR"
+    period="month"
+  />,
+);
+check("card: too little to compare is distinguished from nothing at all", thinBaseline.includes("Too little in"));
+check("card: a thin baseline never shows a percentage", !/\d+%/.test(thinBaseline));
+check(
+  "card: the two silences do not read the same",
+  !thinBaseline.includes("Nothing recorded in") && !noComparison.includes("Too little in"),
 );
 
 // 5. The pie folds to six slices and always writes the values out.
@@ -180,6 +209,88 @@ check(
 );
 check("pie: six or fewer is left alone", foldToSixSlices(nine.slice(0, 5)).length === 5);
 
+/*
+  The seam: the tooltip and the click-through must describe the same expenses.
+
+  This is the check that would have caught the reported bug, and the one no
+  existing test crossed. The fold's arithmetic was already pinned — totals
+  preserved, counts preserved, only ever one slice called "Other" — and every
+  one of those passed while the chart and the panel below it disagreed. Each
+  half was correct on its own; the bug lived between them.
+
+  So this asserts the join rather than either side: whatever a slice claims,
+  the categories it names must add up to exactly that.
+*/
+const foldedSlice = folded.find(isGroup);
+check("pie: a fold produces a slice that is a group", foldedSlice !== undefined);
+
+if (foldedSlice) {
+  const byName = new Map(nine.map((c) => [c.category, c]));
+  const fromMembers = foldedSlice.members.reduce(
+    (sum, name) => sum + Number(byName.get(name)?.totalBase ?? NaN),
+    0,
+  );
+  const memberCount = foldedSlice.members.reduce(
+    (sum, name) => sum + (byName.get(name)?.count ?? NaN),
+    0,
+  );
+
+  check(
+    "pie: the group's total is exactly its members' total",
+    Math.round(fromMembers * 100) === Math.round(Number(foldedSlice.totalBase) * 100),
+    `slice ${foldedSlice.totalBase} vs members ${fromMembers.toFixed(2)}`,
+  );
+  check(
+    "pie: the group's expense count is exactly its members' count",
+    memberCount === foldedSlice.count,
+    `slice ${foldedSlice.count} vs members ${memberCount}`,
+  );
+  // The specific shape of the old bug: members was effectively ["Other"], so
+  // the panel fetched one category while the tooltip summed five.
+  check(
+    "pie: the group names more than the one category it is called after",
+    foldedSlice.members.length > 1 && foldedSlice.members.includes("Other"),
+    foldedSlice.members.join(", "),
+  );
+  check(
+    "pie: a category folded away is still named somewhere",
+    foldedSlice.members.includes("Restaurants"),
+  );
+}
+
+/*
+  And the request the panel actually sends. The invariant above is worth nothing
+  if the fetch drops the set on the way out — which is precisely how the first
+  version failed, by sending one name where the slice meant five.
+*/
+{
+  const sent: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    sent.push(String(input));
+    return new Response(JSON.stringify({ expenses: [], total: 0 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  await listExpenses({ from: "2026-08-01", to: "2026-08-31", categories: foldedSlice?.members ?? [] });
+  globalThis.fetch = originalFetch;
+
+  const url = sent[0] ?? "";
+  const asked = [...new URLSearchParams(url.split("?")[1] ?? "").getAll("category")];
+  check(
+    "pie: the panel asks for every category in the group",
+    foldedSlice !== undefined && asked.length === foldedSlice.members.length,
+    `asked for ${asked.length}: ${asked.join(", ")}`,
+  );
+  check(
+    "pie: the panel asks for them by repeated key, not a joined string",
+    asked.every((name) => !name.includes(",")),
+    url,
+  );
+}
+
 // A real "Other" already in the top five must absorb the remainder rather than
 // producing a second slice with the same name.
 const withOtherHigh: CategorySlice[] = [
@@ -196,6 +307,15 @@ const pie = renderToStaticMarkup(<CategoryPie categories={nine} from="2026-08-01
 check("pie: legend names each category", pie.includes("Groceries") && pie.includes("Bills"));
 check("pie: legend carries the amount as text", pie.includes("500.00"));
 check("pie: legend carries the share", pie.includes("%"));
+
+/*
+  A folded slice must look like a group and name what is in it. Without this a
+  real category disappears from the chart completely — Restaurants was drawn
+  nowhere while the query box still answered questions about it by name, and
+  nothing on screen said where it had gone.
+*/
+check("pie: a folded slice is labelled as a group, not as a category", pie.includes("categories"), "expected a member count in the label");
+check("pie: the legend names the categories folded into the group", pie.includes("Restaurants") && pie.includes("Entertainment"));
 // Structural guards for the bug that made the legend unreadable. Neither can
 // see the screen; both assert the decision that keeps the text on it.
 check(
@@ -650,7 +770,7 @@ const pieOpen = renderToStaticMarkup(
     categories={nine}
     from="2026-08-01"
     currency="EUR"
-    selected="Groceries"
+    selected={{ category: "Groceries", totalBase: "500.00", count: 10, members: ["Groceries"] }}
     selectedExpenses={expenses}
     selectedLoading={false}
     onSelect={() => {}}
@@ -669,7 +789,7 @@ const pieEmptyPanel = renderToStaticMarkup(
     categories={nine}
     from="2026-08-01"
     currency="EUR"
-    selected="Travel"
+    selected={{ category: "Travel", totalBase: "200.00", count: 2, members: ["Travel"] }}
     selectedExpenses={[]}
     selectedLoading={false}
     onSelect={() => {}}

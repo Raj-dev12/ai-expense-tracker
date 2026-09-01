@@ -211,12 +211,28 @@ export function updateExpense(id: string, patch: ExpensePatch): Promise<Expense>
  * answer should not grow a second way to ask it.
  */
 export function listExpenses(
-  options: { limit?: number; from?: string; to?: string; category?: string } = {},
+  options: {
+    limit?: number;
+    from?: string;
+    to?: string;
+    /**
+     * One category, or the whole set a folded pie slice stands for. Sent as a
+     * repeated `category` key, which is what the backend filter reads.
+     *
+     * A list rather than a string because the pie folds its smallest categories
+     * into one slice: clicking it has to ask for exactly the categories that
+     * were drawn, not for the literal name "Other" — which is also a real
+     * category, and answering with only that one is what made the tooltip and
+     * the panel disagree about the same slice.
+     */
+    categories?: readonly string[];
+  } = {},
 ): Promise<{ expenses: Expense[]; total: number }> {
   const query = new URLSearchParams({ limit: String(options.limit ?? 5) });
   if (options.from) query.set("from", options.from);
   if (options.to) query.set("to", options.to);
-  if (options.category) query.set("category", options.category);
+  // append, not set: every name has to survive into the query string.
+  for (const name of options.categories ?? []) query.append("category", name);
 
   return request(`/api/expenses?${query}`, expenseListSchema);
 }
@@ -313,6 +329,9 @@ const summarySchema = z.object({
   // Null when there is nothing to compare against, which is different from a
   // change of zero, and the cards say so differently.
   changePercent: z.number().nullable(),
+  // Why there is no percentage, when there is none. "empty" and "too-small" are
+  // different silences and the card says which.
+  baseline: z.enum(["usable", "empty", "too-small"]),
 });
 
 const categoryBreakdownSchema = z.object({
