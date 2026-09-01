@@ -87,6 +87,29 @@ const envSchema = z.object({
    * flag, and turning it on is the only step needed.
    */
   FX_CONVERSION: z.enum(["on", "off"]).default("off"),
+}).superRefine((value, ctx) => {
+  /**
+   * `sslmode` in the connection string and `DB_SSL` are two answers to one
+   * question, and node-postgres does not merge them — it lets the URL win, then
+   * ignores the ssl option entirely. So a string ending `?sslmode=require`
+   * turns DB_SSL=require into full certificate verification, which is the one
+   * thing it was set to avoid, and the failure arrives as an unexplained
+   * "self-signed certificate in certificate chain" from somewhere deep in a
+   * TLS handshake.
+   *
+   * Rather than silently strip it or quietly let it win, this refuses to start
+   * and says which knob is the real one. Configuration that contradicts itself
+   * is worth failing on.
+   */
+  if (/[?&]sslmode=/i.test(value.DATABASE_URL)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["DATABASE_URL"],
+      message:
+        "Remove the sslmode parameter from the URL. Encryption is decided by DB_SSL, " +
+        "and sslmode in the connection string silently overrides it.",
+    });
+  }
 });
 
 const result = envSchema.safeParse(process.env);

@@ -178,14 +178,14 @@ statements that want a connection which stays put:
 
 ```bash
 cd backend
-DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:migrate
+DATABASE_URL="<session pooler string>" DB_SSL=require npm run db:migrate
 ```
 
 In PowerShell on Windows, environment variables are set on their own lines first:
 
 ```powershell
 cd backend
-$env:DATABASE_URL = "<session pooler string>?sslmode=require"
+$env:DATABASE_URL = "<session pooler string>"
 $env:DB_SSL = "require"
 npm run db:migrate
 Remove-Item Env:DATABASE_URL, Env:DB_SSL   # so the next local run is local again
@@ -202,7 +202,7 @@ Run it the same way after any future `npm run db:generate`.
 Loading the demo data is separate, and **deletes every existing expense first**:
 
 ```bash
-ALLOW_SEED=true DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:seed
+ALLOW_SEED=true DATABASE_URL="<session pooler string>" DB_SSL=require npm run db:seed
 ```
 
 Or in PowerShell:
@@ -210,7 +210,7 @@ Or in PowerShell:
 ```powershell
 cd backend
 $env:ALLOW_SEED = "true"
-$env:DATABASE_URL = "<session pooler string>?sslmode=require"
+$env:DATABASE_URL = "<session pooler string>"
 $env:DB_SSL = "require"
 npm run db:seed
 Remove-Item Env:ALLOW_SEED, Env:DATABASE_URL, Env:DB_SSL
@@ -225,7 +225,7 @@ environment variables on the project:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | the **transaction pooler** string, port 6543, with `?sslmode=require` |
+| `DATABASE_URL` | the **transaction pooler** string, port 6543, exactly as Supabase gives it — no `sslmode` on the end |
 | `DB_POOL_MAX` | `1` |
 | `DB_SSL` | `require` |
 | `AI_PROVIDER` | `mock` |
