@@ -14,6 +14,35 @@ if (existsSync(envFile)) process.loadEnvFile(envFile);
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(3000),
+
+  /**
+   * How many database connections one process may hold open at once.
+   *
+   * Ten is node-postgres's own default and the right number for the Docker
+   * path, where one container serves every request for months. On Vercel it
+   * must be 1: a serverless instance handles one request at a time, so a pool
+   * of ten there is nine connections held open for nothing — multiplied by
+   * however many instances the platform decided to start.
+   */
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+
+  /**
+   * Whether to encrypt the connection to PostgreSQL, and whether to check who
+   * answered.
+   *
+   * off      Local Docker. The database sits on a private network the outside
+   *          world cannot reach, so there is nothing in between to encrypt
+   *          against.
+   * require  Encrypt, but do not verify the certificate. What a hosted
+   *          database such as Supabase accepts out of the box, and honest
+   *          about its limit: nobody can read the traffic in transit, but
+   *          nothing proves the server on the other end is the one you meant.
+   * verify   Encrypt and check the certificate against the machine's trusted
+   *          authorities. Stronger, and it fails unless the provider's
+   *          certificate authority is one of them.
+   */
+  DB_SSL: z.enum(["off", "require", "verify"]).default("off"),
+
   ALLOW_SEED: z.enum(["true", "false"]).default("false"),
   // Which AI adapter to use. Defaults to the offline mock so the app runs
   // fully with no API key set anywhere.

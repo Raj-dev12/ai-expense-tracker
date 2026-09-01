@@ -11,6 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "sourceMap": true,
+    // Emits .d.ts files beside the JavaScript, so api/[...path].ts gets real
+    // types when it imports from dist/ rather than an untyped module.
+    "declaration": true,
     "rootDir": "src",
     "outDir": "dist"
   },

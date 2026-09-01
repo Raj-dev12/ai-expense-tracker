@@ -33,6 +33,7 @@ in Docker, behind HTTPS.
 | Categories | Editable, not fixed. The interface can add, rename and remove them, all in one panel. |
 | Deleting | Expenses can be deleted from the interface, after a confirmation showing what goes. Deleting a category asks what to do with the expenses in it. |
 | Day view | A table of one day at a time, with a date picker. Still one page — it reuses `GET /api/expenses` with `from` and `to` set to the same date rather than adding an endpoint. |
+| Deployment | Two ways, both supported: Docker + Caddy on a VPS, and Vercel + Supabase. Neither replaces the other. |
 
 ---
 
@@ -209,6 +210,37 @@ seed script.
 
 ---
 
+
+### Hour 5b — a second way to deploy
+
+Added after the plan was written, on request. Vercel and Supabase **alongside** Docker, Caddy
+and the VPS, not instead of them. Both stay working, and the README explains both.
+
+Two Vercel projects from this one repository, because Vercel deploys a single directory at a
+time: one rooted at `backend/`, one rooted at `frontend/`, with the frontend rewriting
+`/api/*` to the backend so the browser still sees one address. The alternative — one project
+and npm workspaces — was rejected because it moves both lockfiles to the repository root and
+breaks both Dockerfiles.
+
+The application code is unchanged. `backend/src/app.ts` builds the Fastify app;
+`backend/src/index.ts` opens a port and is what Docker runs; `backend/api/[...path].ts` opens
+nothing and is what Vercel runs. No route, schema or query differs between them.
+
+Three things a serverless deployment forces:
+
+- **Connections.** A pool per instance, times however many instances the platform starts,
+  exhausts PostgreSQL's connection limit. Supabase's transaction pooler on port 6543, plus
+  `DB_POOL_MAX=1`. Its direct connection is IPv6-only and cannot be reached from Vercel at all.
+- **Migrations.** No container start to hang them off, so they are run by hand from a laptop
+  against the session pooler — deliberately not from the build, which runs on every deploy.
+- **Memory is per instance.** The exchange rate cache becomes many small caches, which costs
+  extra calls to a free service and can never be wrong, so it was left alone. The MCP server's
+  timeout went from 10s to 20s to cover a cold start.
+
+**Done when** the Vercel address loads, `/api/health` reports the database reachable, and
+`docker compose up -d` still works untouched on the same commit.
+
+---
 ## Also worth an hour: the README
 
 For a demo repository this matters more than any single feature. Most visitors read it and

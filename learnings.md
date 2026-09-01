@@ -872,6 +872,78 @@ Containers run as the all-powerful root user unless told otherwise. `USER node` 
 an ordinary account, so a flaw in a dependency has far less to work with. One line, and
 nothing about the app has to change.
 
+**Serverless function**
+A program that is not running until somebody asks for it. Instead of a server that sits there
+all day waiting, the platform keeps your code on a shelf, starts it when a request arrives,
+lets it answer, and may shut it down again seconds later. "Serverless" is a bad name — there
+are servers, you just never see one or pay for it while it is idle. This project runs the
+*same* Fastify app both ways: as a normal process under Docker, and as a serverless function
+on Vercel. Only the file that opens the port differs.
+
+**Cold start**
+The wait when a request arrives and nothing is running yet: the platform has to start the
+program, load the code and open a database connection before the first line of your route
+runs. Afterwards the instance stays warm for a while and the next request skips all of that.
+It is the price of not paying for idle time, and it is why the MCP server's timeout was raised
+from ten seconds to twenty.
+
+**Instance**
+One running copy. A busy serverless app may have twenty instances of the same function alive
+at once, each with its own memory — its own variables, its own caches, its own database pool.
+Anything stored in a variable is therefore private to one copy and gone when it shuts down.
+This is the single biggest difference from a normal server, and the reason the exchange rate
+cache stops being one cache and becomes many small ones.
+
+**Managed database**
+A database somebody else runs, backs up and updates, reached over the internet with a
+connection string. Supabase is one; it is PostgreSQL with a web interface around it. The
+opposite is the `db` container in `docker-compose.yml`, which this project also has — same
+PostgreSQL, different landlord.
+
+**Connection pooler**
+A small program that sits between your app and PostgreSQL and shares a handful of real
+database connections among a much larger number of clients. PostgreSQL gives every connection
+its own operating-system process, so they are expensive and strictly limited. One long-running
+container never needs a pooler. Twenty serverless instances each opening their own connections
+absolutely do — without one they exhaust the limit and the database starts refusing everybody,
+at exactly the busy moment you would want it to cope. Supabase's is called Supavisor.
+
+**Session mode and transaction mode**
+The two ways a pooler can lend out a connection. In **session mode** you are given a real
+connection and keep it until you disconnect — simple, and no better than connecting directly
+if what you are doing is short. In **transaction mode** you are given one only for the length
+of a single transaction and it is taken back the instant you finish, so hundreds of clients
+take turns on a few dozen connections. Serverless needs transaction mode. Schema migrations
+want session mode, because they are a long sequence of statements that would rather not be
+interrupted.
+
+**Prepared statement**
+A query sent to the database once to be planned, then run many times with different values.
+Faster when the same query repeats, but it lives on one connection — which is why a
+transaction-mode pooler cannot support them: the connection you prepared on is gone by the
+next statement. It costs this project nothing, because node-postgres and Drizzle only use them
+when you ask explicitly and nothing here does.
+
+**Rewrite (on a host like Vercel)**
+A rule saying "when a request comes in for this path, quietly fetch it from somewhere else and
+return that, without telling the browser". The frontend project rewrites `/api/*` to the
+backend project, so as far as a browser is concerned there is one website. It is the same job
+`reverse_proxy` does in the `Caddyfile` — and it is why this repository still needs no CORS
+configuration.
+
+**IPv4 and IPv6**
+The old and new formats for internet addresses. Old ones look like `95.216.44.12`; new ones
+are longer and full of colons. The world is midway through a slow changeover, so some machines
+can only be reached one way — which stops being trivia the moment your database is IPv6-only
+and the platform calling it is IPv4. That is exactly the situation with Supabase's direct
+connection string, and one of the reasons the pooler is not optional.
+
+**Function timeout (`maxDuration`)**
+The longest a serverless function is allowed to run before the platform kills it. Vercel's
+default is 10 seconds, which is fine for a database query and not fine for a request waiting
+on an AI provider — this app waits up to 15 by default before falling back to the mock. So
+`backend/vercel.json` raises it to 30. A timeout you did not set is still a timeout you have.
+
 ---
 
 ## 10. Terms: tools we type into
@@ -1067,6 +1139,15 @@ want when someone asks you about the project in six months.
 | The comparison note names its window rather than describing it | `↓ 7% against 30 Apr – 30 Jun`, read from the response | Every label on the summary card said "month", which was true when a month was the only period and false for six of the seven the day the dropdown shipped — a quarter was reported as "31 days last month" while the figure underneath compared it against 30 April to 30 June. The numbers were right and only the words were wrong, which is the kind of error a passing test suite is happiest to keep. Prose about a window drifts from the window; a rendered date range cannot. |
 | The seed guarantees the current calendar month | One expense per category inside it, the rest across the previous ninety days | The seed spread backwards from the moment it ran, which is fine on the twentieth and empty on the first: it ran at 23:59 and one minute later the dashboard's default period was a month with nothing in it. A minute-old database looked like a broken one. One per category rather than a block, so the pie still has every colour on the first. |
 | The screenshot caption describes the image, not the intention | It names the period the capture was on, and says the AI panels are empty in it | The capture showed *This week* — a small headline, a single-slice pie, two unused panels. Writing the caption for what was meant rather than what is there would be a small lie in the first thing anyone sees. A screenshot is a claim like any other. |
+| A second way to deploy, not a replacement | Vercel and Supabase added alongside Docker, Caddy and the VPS — both kept working | The Docker setup is the one that demonstrates how the pieces fit together, and throwing it away to gain a free host would have deleted the more instructive half of the project. Keeping both also proves something worth proving: the application code did not have to know which one it was running under. |
+| Two Vercel projects, not one | One with root `backend/`, one with root `frontend/`, and the frontend rewrites `/api/*` to the backend | Vercel deploys one directory at a time, so a single project would have meant npm workspaces — which moves both lockfiles to the repository root and breaks the `COPY package.json package-lock.json` line in *both* Dockerfiles. Two projects cost a rewrite rule; one project cost the Docker setup. |
+| The app is built in `app.ts`, separately from starting it | `buildApp()` registers the routes and returns; `index.ts` calls `listen()`, `api/[...path].ts` never does | The two ways of deploying disagree about exactly one thing — who opens the port. Isolating that in the last three lines of `index.ts` is what makes "the same code runs both ways" a fact rather than a claim. |
+| The Vercel function imports `dist/`, not `src/` | Vercel runs the same `npm run build` the Dockerfile runs, then the function imports the compiled output | Letting Vercel's own bundler compile the TypeScript would have been a second build of the same code, by a different compiler, with a different opinion about `nodenext` import paths. One build, one output, checked the same way in both places. |
+| Serverless database connections | Supabase's transaction pooler on port 6543, plus `DB_POOL_MAX=1` | A connection pool per instance, times however many instances the platform starts, exhausts PostgreSQL's connection limit under exactly the load you want to survive. Transaction mode hands a connection back after every transaction so the instances share a few dozen. There is also no choice in it: the direct connection is IPv6-only and Vercel is IPv4. |
+| Encryption is an environment variable, not a guess | `DB_SSL=off\|require\|verify`, rather than sniffing the URL for a hostname | Looking for "supabase" in the connection string would work today and be wrong the first time the database moved. `require` encrypts without checking who answered, which is what a hosted database accepts out of the box — an honest halfway house, and `verify` is there for anyone who installs the provider's certificate authority. |
+| Hosted migrations are run by hand | From a laptop, against the session pooler — deliberately not wired into the Vercel build | Under Docker the container start applies them, which is right because a container start is one thing happening once. A build runs on every deploy and two can overlap, so it is a poor place to be altering a schema. The trade is one command to remember, written down in the README. |
+| The exchange rate cache was left alone | Still a `Map` in memory, now one per instance | Entries are keyed by date and currency pair and a historical rate never changes, so a cold cache costs an extra call to a free service and can never be wrong. With `FX_CONVERSION` off — the default — the code does not run at all. Moving it to a table would have been solving a problem this project does not have. |
+| The MCP server still caches nothing | Categories and base currency read fresh on every call, timeout raised from 10s to 20s instead | The reason for not caching them did not change: both can be edited in the browser mid-conversation, and an assistant confidently using a stale list is wrong in the way that matters. Serverless made those reads slower, not less necessary, so the timeout moved rather than the design. |
 
 ---
 
@@ -1156,6 +1237,27 @@ applies to pasting one anywhere public — deleting the message doesn't unshare 
 
 Cleaning the history is optional tidying. Revoking is the actual fix, and it should happen
 first.
+
+---
+
+### Secrets on a hosting platform
+
+`.env` is the answer on a machine you control. On Vercel there is no machine and no file: the
+values are typed into the project's settings and injected when a function starts. The rules do
+not change — the same connection string is the same secret — but two things are worth knowing.
+
+**The Supabase database password is inside the connection string.** `postgres://postgres.abc:
+THE-PASSWORD@aws-0-eu-central-1.pooler.supabase.com:6543/postgres` is not a hostname you can
+paste into an issue, a screenshot or a chat. It is a password with some decoration around it.
+Supabase shows it once, when the project is created, which is the moment to save it somewhere
+that is not this repository.
+
+**`DB_SSL=require` encrypts without checking who answered.** Traffic between Vercel and
+Supabase cannot be read in transit, but nothing proves the machine on the other end is
+Supabase rather than something that got in the way. That is what the hosted database accepts
+with no further setup, and it is a real step up from nothing — but it is worth naming rather
+than assuming the padlock means more than it does. `DB_SSL=verify` closes the gap once the
+provider's certificate authority is installed where the connection is made from.
 
 ---
 

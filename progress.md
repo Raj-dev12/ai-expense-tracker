@@ -144,6 +144,40 @@ Asked for after the build plan was written, and built on request rather than sug
       whitelist that accounts for every word, checked before any query shape is chosen —
       "lowest food expense" had walked past all three and answered with a real number
 
+
+## Hour 5b — Vercel and Supabase, alongside Docker
+
+Added on request. The Docker setup is untouched: same Dockerfiles, same `docker-compose.yml`,
+same `Caddyfile`, still the way the project is meant to be read.
+
+- [x] `backend/src/app.ts` — `buildApp()` split out of `index.ts`, so the app is built in one
+      place and only the last three lines of `index.ts` know about opening a port
+- [x] `backend/api/[...path].ts` — one serverless function answering every `/api/` path,
+      handing each request straight to that same app. No route, schema or query changed
+- [x] `DB_POOL_MAX` and `DB_SSL` added to the environment schema and used by the pool, plus a
+      10-second connection timeout so a function cannot burn its whole budget waiting
+- [x] `backend/vercel.json` (build command, `maxDuration: 30`, which `AI_TIMEOUT_MS=15000`
+      needs and Vercel's default 10 would have killed) and a small `public/index.html` so the
+      backend project has something to serve
+- [x] `frontend/vercel.json` — SPA fallback plus the `/api/*` rewrite to the backend project,
+      which is what keeps the browser on one origin and this repository free of CORS
+- [x] `tsconfig.api.json`, and `npm run build` now type-checks the Vercel entry point too, so
+      a typo there fails locally and in Docker rather than only during a deploy
+- [x] MCP request timeout 10s → 20s, to cover a cold start. Nothing else about the MCP server
+      changed: it still reads categories and the base currency fresh on every call
+- [x] Verified: 113 backend tests pass; both entry points answered against the local database
+      — the listening one and the serverless one, the latter through a throwaway harness that
+      calls the handler exactly as Vercel does. Health, analytics, the 404 handler and a
+      rejected POST all behaved identically
+- [x] `README.md` has a "Deploying it: two ways" section with the full Supabase and Vercel
+      walkthrough; `learnings.md` gained ten terms and nine decision rows; `.env.example` and
+      `build-plan.md` record the addition
+- [ ] Supabase project created, migrations applied to it
+- [ ] Both Vercel projects deployed, and `frontend/vercel.json` pointed at the real backend
+      address — it currently holds a placeholder
+- [ ] `BACKEND_URL` in `.env` switched to the deployed address and the MCP server retried
+      against it
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

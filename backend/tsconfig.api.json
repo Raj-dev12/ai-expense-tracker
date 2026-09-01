@@ -1,0 +1,14 @@
+{
+  // The Vercel entry point lives outside src/, because Vercel insists the
+  // folder is called api/ and sits at the root of what it deploys. The main
+  // tsconfig compiles src/ and nothing else, so without this file that one
+  // function would never be type-checked here — only on Vercel, during a
+  // deploy, which is a slow and public place to find a typo.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false
+  },
+  "include": ["api/**/*.ts"]
+}

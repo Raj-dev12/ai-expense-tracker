@@ -10,3 +10,8 @@ dist
 # but if one is ever created here it must not end up inside an image.
 .env
 .env.*
+
+# Vercel's scratch folder. api/, public/ and vercel.json are deliberately not
+# listed: `npm run build` type-checks the Vercel entry point, so those files
+# have to be present for the same build command to work in both places.
+.vercel

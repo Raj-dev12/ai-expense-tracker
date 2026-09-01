@@ -67,6 +67,10 @@ server — arrives through the same front door. Postgres is published to `127.0.
 a backend running outside Docker can still connect while the database stays unreachable from
 anywhere else.
 
+That diagram is the Docker setup. The same code also deploys to Vercel and Supabase, in a
+shape that looks different and behaves almost identically — see [Deploying it: two
+ways](#deploying-it-two-ways).
+
 ## The stack
 
 | Piece | What | Why |
@@ -113,6 +117,156 @@ docker compose ps               # health of each
 docker compose down             # stop, keeping the database
 docker compose down -v          # stop and delete the database too
 ```
+
+## Deploying it: two ways
+
+This repository deploys two different ways, and both are kept working. Adding the second one
+changed nothing about the first — the Dockerfiles, `docker-compose.yml` and the `Caddyfile`
+are untouched.
+
+| | Docker on a VPS | Vercel + Supabase |
+|---|---|---|
+| Frontend | Caddy serves the built files | Vercel serves them |
+| Backend | one Fastify process, running for months | a serverless function, started when a request arrives |
+| Database | a Postgres container beside it | Supabase, reached through a connection pooler |
+| Migrations | applied automatically on every container start | applied by you, from your own machine |
+| HTTPS | Caddy fetches a certificate from Let's Encrypt | Vercel provides one |
+
+**The application code is identical in both.** `backend/src/app.ts` builds the Fastify app and
+registers the six route plugins. The only thing the two ways disagree about is who opens the
+port: `backend/src/index.ts` calls `listen()` and is what Docker runs, while
+`backend/api/[...path].ts` never listens at all and hands each request Vercel gives it to that
+same app. Not one route, schema or query differs between them.
+
+### Vercel and Supabase
+
+```
+  browser ──▶ vercel project: frontend ──── /api/* ──▶ vercel project: backend ──▶ supabase
+              the built React app,          rewrite     api/[...path].ts,          postgres,
+              served as static files                    one serverless function    via the
+                    ▲                                        ▲                     pooler
+                    │                                        │
+                    └── one origin, so no CORS               │ HTTPS, the same public API
+                                                             │
+  an MCP client ─────────────────────────────────────────────┘
+                     stdio, still running on your own machine
+```
+
+Two Vercel projects from the same repository, because Vercel deploys one directory at a time.
+The frontend project rewrites `/api/*` to the backend project, so the browser still talks to a
+single address — exactly the job Caddy does in the other setup, and the reason there is no CORS
+configuration anywhere in this repository.
+
+**1. Create the database.** Sign in at [supabase.com](https://supabase.com) and create a
+project. It asks for a name, a **database password** — let it generate one and save it
+immediately, because it is part of the connection string and is not shown again — a region,
+and a plan. Free is enough. Choose a region near you; this app is built around
+`Europe/Helsinki`, so Frankfurt is a sensible default.
+
+When it has finished provisioning, press **Connect** and copy two of the three strings it
+offers:
+
+| String | Port | Use it for |
+|---|---|---|
+| Direct connection | 5432 | nothing here — it is IPv6-only, and Vercel cannot reach it |
+| Session pooler | 5432 | migrations and seeding, from your own machine |
+| **Transaction pooler** | **6543** | **the deployed app** |
+
+**2. Apply the migrations.** There is no container start to hang them off, so you run them
+once, yourself, pointed at Supabase. Use the **session** string — schema changes are several
+statements that want a connection which stays put:
+
+```bash
+cd backend
+DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:migrate
+```
+
+This is the same Drizzle migrator the Dockerfile runs, reading the same SQL files in
+`backend/src/db/migrations`. It records what it has applied, so running it again does nothing.
+Run it the same way after any future `npm run db:generate`.
+
+Loading the demo data is separate, and **deletes every existing expense first**:
+
+```bash
+ALLOW_SEED=true DATABASE_URL="<session pooler string>?sslmode=require" DB_SSL=require npm run db:seed
+```
+
+Migrations are deliberately not wired into the Vercel build. A build runs on every deploy and
+two can run at once, which makes it a poor place to be changing a schema.
+
+**3. Deploy the backend.** Import this repository at [vercel.com](https://vercel.com) with
+**Root Directory** set to `backend`. `backend/vercel.json` handles the rest. Set these
+environment variables on the project:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | the **transaction pooler** string, port 6543, with `?sslmode=require` |
+| `DB_POOL_MAX` | `1` |
+| `DB_SSL` | `require` |
+| `AI_PROVIDER` | `mock` |
+| `FX_CONVERSION` | `off` |
+| `TZ` | `Europe/Helsinki` |
+
+No key is needed; the app runs on the mock parser exactly as it does locally. Deploy, then open
+`/api/health` on the address Vercel gives you. It should say the database is reachable.
+
+**4. Deploy the frontend.** Import the same repository again with **Root Directory** set to
+`frontend`, then edit `frontend/vercel.json` and replace
+`REPLACE-WITH-YOUR-BACKEND-PROJECT.vercel.app` with the backend's real address. Commit, and it
+redeploys. That one line is what makes `/api` on the frontend reach the backend.
+
+**5. Point the MCP server at it.** One line in `.env`:
+
+```
+BACKEND_URL=https://your-frontend-project.vercel.app
+```
+
+The frontend's address, not the backend's, so the MCP server arrives through the same front
+door a browser does.
+
+### Why the transaction pooler, and not the first string Supabase offers
+
+A connection pool keeps a few connections to Postgres open and reuses them. That is right for
+one container serving every request. It is wrong on Vercel, where the same module is loaded by
+as many function instances as the platform decides to start, each with a pool of its own.
+Postgres has a hard connection limit, and past it new connections are simply refused — under
+exactly the load you would want the app to survive.
+
+Supabase runs a pooler called Supavisor in front of the database for this. In **transaction
+mode**, port 6543, a real Postgres connection is borrowed only for the length of a single
+transaction and handed straight back, so a large number of clients share a small number of
+connections. `DB_POOL_MAX=1` on top of that stops each instance holding ten connections it
+cannot use, since it only ever serves one request at a time.
+
+There is a second reason it is not optional: Supabase's direct connection is IPv6-only on the
+free plan and Vercel's functions are IPv4, so the direct string cannot connect at all.
+
+Transaction mode has one real constraint — it does not support protocol-level prepared
+statements. Neither node-postgres nor Drizzle uses them unless you call Drizzle's `.prepare()`,
+and nothing here does. Ordinary transactions are unaffected: `renameCategory()` runs two writes
+in one transaction and works normally, because a transaction pins a connection for its duration
+by design.
+
+`DB_SSL=require` encrypts the connection but does not check the certificate, which is what
+Supabase accepts with no further setup. That is worth being plain about: nobody can read the
+traffic in transit, but nothing proves the machine answering is the one you meant.
+`DB_SSL=verify` is stricter, and works once Supabase's certificate authority is installed on
+the machine making the connection.
+
+### What behaves differently once it is deployed this way
+
+- **The first request after a quiet spell is slow.** Nothing is running until a request arrives
+  — a "cold start". Vercel keeps an instance warm afterwards.
+- **The exchange rate cache is per instance.** `backend/src/fx/rates.ts` holds its rates in a
+  `Map`, and there are now many copies of it. Nothing goes wrong: entries are keyed by date and
+  currency pair and a historical rate never changes, so the worst case is more calls to
+  Frankfurter. With `FX_CONVERSION=off` — the default — that code does not run at all.
+- **Each MCP tool call becomes several function calls.** The MCP server reads the categories
+  and the base currency fresh every time, deliberately, so one `add_expense` is three requests.
+  Its timeout went from ten seconds to twenty to cover a cold start.
+- **`maxDuration` is 30 seconds**, set in `backend/vercel.json`. Vercel's default is 10 and
+  `AI_TIMEOUT_MS` defaults to 15 — so with a real API key configured, the default would kill
+  the request before the app's own timeout could fall back to the mock.
 
 ## The AI safety pattern
 
@@ -394,9 +548,13 @@ reasonable ideas; all would make this a bigger project rather than a clearer one
 ```
 .
 ├── backend/          Fastify API — routes, Drizzle schema, AI adapters, FX
-│   └── Dockerfile    multi-stage: compiles TypeScript, ships only the result
+│   ├── src/app.ts    builds the Fastify app; both ways of deploying start here
+│   ├── api/          the Vercel entry point — one file, never listens
+│   ├── Dockerfile    multi-stage: compiles TypeScript, ships only the result
+│   └── vercel.json   build command and the function timeout
 ├── frontend/         React single page
-│   └── Dockerfile    multi-stage: vite build, then Caddy serving the files
+│   ├── Dockerfile    multi-stage: vite build, then Caddy serving the files
+│   └── vercel.json   SPA fallback, and the /api rewrite to the backend project
 ├── mcp/              MCP server — seven tools, calls the HTTP API (no Dockerfile)
 ├── docs/             the screenshot this README opens with
 ├── Caddyfile         serves the frontend, proxies /api to the backend

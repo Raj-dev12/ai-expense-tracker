@@ -12,7 +12,22 @@ import { z } from "zod";
  */
 
 const BACKEND_URL = (process.env.BACKEND_URL ?? "http://localhost:3000").replace(/\/$/, "");
-const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * How long to wait on the backend before giving up.
+ *
+ * This was ten seconds, which is generous for a container that is already
+ * running and holding open database connections. It is not generous for a
+ * serverless deployment: there, a request that arrives when nothing is warm
+ * has to start the program, open a connection through the pooler and only then
+ * run the query. That happens on the first tool call of a conversation, which
+ * is exactly the one somebody is watching.
+ *
+ * Twenty is the cost of the trade. A backend that is genuinely down now takes
+ * twenty seconds to say so instead of ten, which is the less annoying of the
+ * two ways to be wrong.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 /**
  * There is no copy of the category list here any more.
