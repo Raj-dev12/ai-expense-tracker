@@ -230,7 +230,13 @@ environment variables on the project:
 | `DB_SSL` | `require` |
 | `AI_PROVIDER` | `mock` |
 | `FX_CONVERSION` | `off` |
-| `TZ` | `Europe/Helsinki` |
+
+There is deliberately no `TZ` here. Vercel rejects it as a reserved name, and the app does not
+want it: `lib/dates.ts` names `Europe/Helsinki` explicitly and every date decision goes through
+that, precisely so the machine's clock settings cannot change what day an expense lands on.
+Under Docker `TZ` is still set, where it costs nothing and makes container logs readable — but
+nothing has ever read it. `/api/health` reports the time zone it is actually using, which is
+how you can tell.
 
 No key is needed; the app runs on the mock parser exactly as it does locally. Deploy, then open
 `/api/health` on the address Vercel gives you. It should say the database is reachable.
@@ -239,6 +245,24 @@ No key is needed; the app runs on the mock parser exactly as it does locally. De
 `frontend`, then edit `frontend/vercel.json` and replace
 `REPLACE-WITH-YOUR-BACKEND-PROJECT.vercel.app` with the backend's real address. Commit, and it
 redeploys. That one line is what makes `/api` on the frontend reach the backend.
+
+**Use the project's production domain, not the URL from a deployment.** Vercel hands out three
+kinds of address, and only two of them are stable:
+
+| Address | Stable? |
+|---|---|
+| `project-a9hcvbza7-scope.vercel.app` | **No.** The middle part is a per-deployment hash — a new one every single deploy. |
+| `project-git-master-scope.vercel.app` | Yes, follows the branch. |
+| `project-scope.vercel.app` | Yes, always points at the current production deployment. This is the one to use. |
+
+Hardcoding a deployment URL here works exactly once, then breaks silently the next time the
+backend is deployed — the frontend keeps rewriting to an address that still exists and still
+answers, but is running last week's code. Project settings, under Domains, name the stable one.
+
+Also check **Deployment Protection** on the backend project. If it covers production, the
+rewrite arrives without a Vercel login cookie and gets a redirect to a sign-in page instead of
+JSON, which reaches the browser as "could not reach the server" — a confusing symptom for a
+setting nobody remembers turning on.
 
 **5. Point the MCP server at it.** One line in `.env`:
 
