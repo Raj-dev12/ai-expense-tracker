@@ -229,10 +229,16 @@ Found by using it, not by testing it. Each was investigated before anything was 
       every existing guard: every word known, category and date both matched, nothing unread.
       `unreadWords` guards against dropping a *constraint*; this was an unrecognised *ask*,
       which the whitelist cannot see because "where" is a perfectly known word
-- [x] `asksIn()` counts the interrogative heads before a shape is chosen. Two or more and the
-      question is refused with both named, so neither part can look answered. Keyed on heads
-      rather than question words, so "which month did I spend most on restaurants" is still one
-      question rather than two
+- [x] `asksIn()` counts the interrogative heads, in the order the sentence asks them, before a
+      shape is chosen. Keyed on heads rather than question words, so "which month did I spend
+      most on restaurants" is still one question rather than two
+- [x] Each ask then becomes a query of its own and the sentences are joined, so both halves are
+      answered rather than both refused. They share the filters the whole sentence sets — the
+      "it" in "where did I spend it" means the restaurant spending of that day, and reading the
+      clauses separately would have widened the second part into a different question
+- [x] An ask with no shape at all — "who" — is named in the reply rather than dropped, so a
+      partly answerable question says which part it could not do. A compound is typed to hold
+      only answerable parts, so it cannot contain a refusal or another compound
 - [x] `where` and `when` now answer — by shop and by day. Both were known words no shape read,
       so "where did I spend the most" had been quietly becoming a plain total
 - [x] Found while fixing that: a period phrase was being read twice. "Where did I spend the most

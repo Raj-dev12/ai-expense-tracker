@@ -1,5 +1,13 @@
 import { addDays, startOfMonth, startOfWeek } from "../lib/dates.js";
-import type { AskRequest, StructuredQuestion } from "./types.js";
+import type {
+  AnswerableQuestion,
+  AskRequest,
+  QuestionBucket,
+  QuestionFilters,
+  QuestionMeasure,
+  QuestionOrder,
+  StructuredQuestion,
+} from "./types.js";
 
 /**
  * The offline question parser: regular expressions and word lists, no network.
@@ -130,9 +138,18 @@ const ASKS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "who", pattern: /\bwho\b/i },
 ];
 
-/** Every distinct ask in a sentence, in the order they are listed above. */
+/**
+ * Every distinct ask in a sentence, in the order they appear in it.
+ *
+ * Sentence order, not table order, because the answer is read back beside the
+ * question: "when did I spend the most and where" should be answered with the
+ * day first and the shop second, or the reply quietly reorders what was asked.
+ */
 export function asksIn(text: string): string[] {
-  return ASKS.filter((ask) => ask.pattern.test(text)).map((ask) => ask.name);
+  return ASKS.map((ask) => ({ name: ask.name, at: text.search(ask.pattern) }))
+    .filter((found) => found.at >= 0)
+    .sort((a, b) => a.at - b.at)
+    .map((found) => found.name);
 }
 
 /** Something typed into the wrong box: a figure, with nothing asked. */
@@ -219,6 +236,51 @@ export function unreadWords(
     .filter((word) => !KNOWN_WORDS.has(word) && !/^\d+$/.test(word));
 }
 
+/**
+ * The query shape one ask wants, given the filters read from the whole sentence.
+ *
+ * Only reached when a sentence asks more than one thing. A single ask still
+ * goes through the ordinary branches below, which read the sentence rather than
+ * just its interrogative head and can therefore say more about it — "which
+ * month did I spend most on restaurants" is a grouping this table has no way to
+ * express, and does not need to.
+ *
+ * "How much" and "how many" carry their own measure: in "how much did I spend
+ * and how many expenses were there", the shared measure would be wrong for one
+ * of them whichever way it was resolved.
+ */
+function shapeForAsk(
+  ask: string,
+  context: { order: QuestionOrder; measure: QuestionMeasure; filters: QuestionFilters },
+): AnswerableQuestion | null {
+  const { order, measure, filters } = context;
+  const grouped = (bucket: QuestionBucket): AnswerableQuestion => ({
+    kind: "topBuckets",
+    bucket,
+    measure,
+    order,
+    limit: 1,
+    filters,
+  });
+
+  switch (ask) {
+    case "how much":
+      return { kind: "aggregate", measure: "total", filters };
+    case "how many":
+      return { kind: "aggregate", measure: "count", filters };
+    case "where":
+      return grouped("merchant");
+    case "when":
+      return grouped("day");
+    case "which category":
+      return grouped("category");
+    default:
+      // "who" — the data records shops, not people. Named as unanswered rather
+      // than dropped.
+      return null;
+  }
+}
+
 export function readQuestion(request: AskRequest): StructuredQuestion {
   const text = request.question.trim();
   const unsupported = (reason: string): StructuredQuestion => ({ kind: "unsupported", reason });
@@ -245,23 +307,7 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
     return unsupported("That does not read as a question about your spending.");
   }
 
-  // 3. Never silently answer half a question. Counted before a shape is chosen,
-  //    for the same reason the constraint guard is: so there is no branch it can
-  //    be forgotten on.
-  //
-  //    Both parts here are things this can answer on their own — it is the pair
-  //    it cannot do, because one query returns one figure. Refusing and naming
-  //    both is the honest version; answering the first and staying quiet about
-  //    the second is not.
   const asks = asksIn(text);
-  if (asks.length > 1) {
-    const named = asks.map((ask) => `"${ask}"`).join(" and ");
-    return unsupported(
-      `That asks ${asks.length === 2 ? "two things" : `${asks.length} things`} at once — ${named} — ` +
-        "and I answer one at a time. I have not guessed at either. Ask them separately.",
-    );
-  }
-
   const order = LOWEST.test(text) ? "lowest" : "highest";
   const measure = COUNT.test(text) ? "count" : AVERAGE.test(text) ? "average" : "total";
 
@@ -269,7 +315,7 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
   const merchant = findMerchant(text);
   const window = findWindow(text, request.today);
 
-  // 4. Never silently drop a constraint. One check, before any shape is chosen,
+  // 3. Never silently drop a constraint. One check, before any shape is chosen,
   //    so there is no fourth branch for it to be forgotten on.
   const unread = unreadWords(text, { category, merchant });
   if (unread.length > 0) {
@@ -285,6 +331,38 @@ export function readQuestion(request: AskRequest): StructuredQuestion {
     from: window?.from ?? null,
     to: window?.to ?? null,
   };
+
+  // 4. More than one thing asked. Each ask becomes a query of its own.
+  //
+  //    They share one set of filters, read from the whole sentence, because
+  //    that is what the sentence means: in "how much did I spend on restaurants
+  //    today and where did I spend it", the "it" is the restaurant spending of
+  //    that day. Splitting the text into clauses and reading each separately
+  //    would drop "on restaurants today" from the second part and answer a
+  //    wider question than was asked — the very failure this guard exists for.
+  //
+  //    An ask with no shape at all cannot be answered, and is named rather than
+  //    ignored. Answering the parts it understood while staying silent about
+  //    the rest is the original bug in a smaller form.
+  if (asks.length > 1) {
+    const parts: AnswerableQuestion[] = [];
+    const unanswered: string[] = [];
+
+    for (const ask of asks) {
+      const shape = shapeForAsk(ask, { order, measure, filters });
+      if (shape) parts.push(shape);
+      else unanswered.push(ask);
+    }
+
+    if (parts.length === 0) {
+      const named = unanswered.map((ask) => `"${ask}"`).join(" and ");
+      return unsupported(
+        `I cannot answer ${named}. I can look up amounts, counts, shops, days, weeks, months and categories.`,
+      );
+    }
+
+    return { kind: "compound", parts, unanswered };
+  }
 
   // 5. Grouped into buckets, when the sentence names one.
   //

@@ -245,35 +245,64 @@ test("half a question is never answered silently", async (t) => {
     an unrecognised subject but an unrecognised *ask*, and only counting the
     asks finds it.
   */
-  await t.test("the reported compound question is refused, not half-answered", () => {
-    const question = read("how much did I spend on restaurants today and where did I spend it");
-    assert.equal(question.kind, "unsupported");
-    if (question.kind !== "unsupported") return;
-    assert.match(question.reason, /two things/);
+  const compound = read("how much did I spend on restaurants today and where did I spend it");
+
+  await t.test("the reported question becomes two queries, not one", () => {
+    assert.equal(compound.kind, "compound");
+    if (compound.kind !== "compound") return;
+    assert.equal(compound.parts.length, 2);
+    assert.deepEqual(compound.unanswered, []);
   });
 
-  await t.test("the refusal names both parts, so neither looks answered", () => {
-    const question = read("how much did I spend on restaurants today and where did I spend it");
-    if (question.kind !== "unsupported") throw new Error("expected a refusal");
-    assert.match(question.reason, /"how much"/);
-    assert.match(question.reason, /"where"/);
+  await t.test("the amount and the shop are both asked for", () => {
+    if (compound.kind !== "compound") throw new Error("expected a compound");
+    const [amount, where] = compound.parts;
+    assert.equal(amount?.kind, "aggregate");
+    if (amount?.kind === "aggregate") assert.equal(amount.measure, "total");
+    assert.equal(where?.kind, "topBuckets");
+    if (where?.kind === "topBuckets") assert.equal(where.bucket, "merchant");
   });
 
-  await t.test("other compounds are caught the same way", () => {
-    for (const question of [
-      "how many expenses and how much did I spend",
-      "when did I spend the most and where",
-      "which category and which shop did I spend most at",
-    ]) {
-      assert.equal(read(question).kind, "unsupported", question);
+  await t.test("both parts keep the constraints the sentence set", () => {
+    if (compound.kind !== "compound") throw new Error("expected a compound");
+    // "Where did I spend it" means the restaurant spending of that day, not
+    // everything. Splitting the sentence into clauses would have widened the
+    // second part into a different question.
+    for (const part of compound.parts) {
+      assert.equal(part.filters.category, "Restaurants");
+      assert.equal(part.filters.from, "2026-08-31");
+      assert.equal(part.filters.to, "2026-08-31");
     }
+  });
+
+  await t.test("the parts follow the order of the sentence", () => {
+    const asked = read("when did I spend the most and where did I spend it");
+    if (asked.kind !== "compound") throw new Error("expected a compound");
+    const buckets = asked.parts.map((part) => (part.kind === "topBuckets" ? part.bucket : null));
+    assert.deepEqual(buckets, ["day", "merchant"]);
+  });
+
+  await t.test("an ask with no shape is named, never dropped", () => {
+    // The half that could be answered still is. The half that cannot is said
+    // out loud, which is the whole point — answering one and going quiet about
+    // the other is the original bug in a smaller form.
+    const partial = read("how much did I spend and who did I pay");
+    assert.equal(partial.kind, "compound");
+    if (partial.kind !== "compound") return;
+    assert.equal(partial.parts.length, 1);
+    assert.deepEqual(partial.unanswered, ["who"]);
+  });
+
+  await t.test("a question with nothing answerable in it is still refused", () => {
+    const none = read("who did I pay and who else was there");
+    assert.equal(none.kind, "unsupported");
   });
 
   /*
     The half that must keep working. A grouping plus a measure is one ask, not
     two — "spend" in "which month did I spend most" supplies the measure for
     "which month" rather than starting a second question. Counting any question
-    word rather than interrogative heads would have refused all of these.
+    word rather than interrogative heads would have split all of these.
   */
   await t.test("a grouping with a measure is still one question", () => {
     for (const question of [
@@ -283,8 +312,27 @@ test("half a question is never answered silently", async (t) => {
       "which shop did I spend the most at",
       "how much did I spend on restaurants today",
     ]) {
+      assert.notEqual(read(question).kind, "compound", question);
       assert.notEqual(read(question).kind, "unsupported", question);
     }
+  });
+
+  await t.test("a compound cannot contain a refusal or another compound", () => {
+    // Structural, not conventional: parts are typed to the three answerable
+    // shapes, so there is no way to express a nested one.
+    if (compound.kind !== "compound") throw new Error("expected a compound");
+    for (const part of compound.parts) {
+      assert.ok(["aggregate", "topExpenses", "topBuckets"].includes(part.kind), part.kind);
+    }
+  });
+
+  await t.test("an unread constraint still wins over splitting the question", () => {
+    // A word nobody understood is the more actionable complaint, and answering
+    // two halves of a question that was misread is worse than answering none.
+    const question = read("how much did I spend on zzz and where did I spend it");
+    assert.equal(question.kind, "unsupported");
+    if (question.kind !== "unsupported") return;
+    assert.match(question.reason, /"zzz"/);
   });
 });
 

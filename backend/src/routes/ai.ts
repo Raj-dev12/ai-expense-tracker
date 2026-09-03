@@ -144,6 +144,50 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
       };
     }
 
+    /**
+     * More than one thing asked in one sentence, answered part by part.
+     *
+     * Each part is a query of its own with its own figure — nothing here
+     * composes numbers, and no part borrows another's answer. The filters are
+     * resolved per part rather than once: the mock gives every part the same
+     * ones, but a real provider need not, and resolving each is both correct in
+     * general and how an invented category still gets refused rather than
+     * quietly returning nothing.
+     *
+     * `unanswered` is the half that matters most. A question this can only
+     * partly answer says so in the same breath, because answering the part it
+     * understood and staying silent about the rest is exactly the bug this
+     * whole path exists to prevent.
+     */
+    if (question.kind === "compound") {
+      const answered = await Promise.all(
+        question.parts.map(async (part) => {
+          const partFilters = await resolveFilters(part.filters, window);
+          const result = await runQuestion(userId, part, partFilters);
+          return {
+            sentence: formatAnswer(result, part, partFilters, baseCurrency),
+            reading: describeQuestion(part, partFilters),
+          };
+        }),
+      );
+
+      const sentences = answered.map((part) => part.sentence);
+      if (question.unanswered.length > 0) {
+        const named = question.unanswered.map((ask) => `"${ask}"`).join(" and ");
+        sentences.push(
+          `I could not answer ${named} — I can look up amounts, counts, shops, days, weeks, months and categories.`,
+        );
+      }
+
+      return {
+        ...base,
+        answerable: true,
+        looksLikeExpense: false,
+        answer: sentences.join(" "),
+        reading: answered.map((part) => part.reading).filter(Boolean).join(" · ") || null,
+      };
+    }
+
     // A category that does not exist is a 400 naming the ones that do, never a
     // silently empty answer — which would read as "you spent nothing on that".
     const filters = await resolveFilters(question.filters, window);

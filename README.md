@@ -571,6 +571,7 @@ PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
 POST   /api/ai/monthly-summary  from, to; a period in a sentence or two, saves nothing
 POST   /api/ai/ask              a question in, a computed answer out, saves nothing
+                                a question that asks two things gets both answered
 ```
 
 Unknown query parameters are rejected with a 400 rather than ignored, because

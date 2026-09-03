@@ -131,15 +131,16 @@ export type QuestionFilters = {
   to?: string | null;
 };
 
-export type StructuredQuestion =
-  /** Outside the grammar. Says so rather than guessing. */
-  | { kind: "unsupported"; reason: string }
-  /**
-   * An amount with no question in it — almost certainly meant for the add box at
-   * the top of the page. The most likely mistake with two text boxes on one
-   * screen, so it gets a signpost of its own rather than a flat refusal.
-   */
-  | { kind: "looksLikeExpense" }
+/**
+ * A question shape that actually produces figures.
+ *
+ * Named separately from `StructuredQuestion` because a compound question holds
+ * a list of these. Keeping the list to *these* three rather than to the whole
+ * union is what makes a compound structurally unable to contain a refusal, a
+ * signpost, or another compound — the nesting is impossible rather than merely
+ * discouraged.
+ */
+export type AnswerableQuestion =
   /** One number over a filtered set: how much, how many, the average. */
   | { kind: "aggregate"; measure: QuestionMeasure; filters: QuestionFilters }
   /** Individual expenses, ranked by amount. */
@@ -153,6 +154,30 @@ export type StructuredQuestion =
       limit: number;
       filters: QuestionFilters;
     };
+
+export type StructuredQuestion =
+  /** Outside the grammar. Says so rather than guessing. */
+  | { kind: "unsupported"; reason: string }
+  /**
+   * An amount with no question in it — almost certainly meant for the add box at
+   * the top of the page. The most likely mistake with two text boxes on one
+   * screen, so it gets a signpost of its own rather than a flat refusal.
+   */
+  | { kind: "looksLikeExpense" }
+  | AnswerableQuestion
+  /**
+   * More than one thing asked in one sentence, answered part by part.
+   *
+   * "How much did I spend on restaurants today and where did I spend it" is two
+   * questions sharing one set of filters. Each part becomes its own query, each
+   * query produces its own figure, and the sentences are joined — no part is
+   * dropped and no part is guessed at.
+   *
+   * `unanswered` names the asks that have no shape at all, so a question that is
+   * half answerable says which half it could not do rather than quietly
+   * returning the half it could. That was the original bug in a smaller form.
+   */
+  | { kind: "compound"; parts: AnswerableQuestion[]; unanswered: string[] };
 
 export type AskRequest = {
   question: string;

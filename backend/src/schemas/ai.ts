@@ -94,20 +94,14 @@ const bucketSchema = z.enum(["day", "week", "month", "category", "merchant"]);
 const limitSchema = z.number().int().min(1).max(10);
 
 /**
- * What a parser is allowed to hand back for a question.
+ * The three shapes that actually produce figures.
  *
- * A discriminated union, so an invented `kind` is refused by the shape rather
- * than falling through a switch into whichever branch happens to be last. This
- * is the check that makes the grammar a real boundary instead of a description
- * of one — everything downstream can assume it is holding one of exactly five
- * things.
+ * Pulled out of the union below so a compound question can hold a list of
+ * exactly these. A compound therefore cannot contain a refusal, a signpost, or
+ * another compound — not by convention, but because the shape has no way to
+ * express it.
  */
-export const structuredQuestionSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("unsupported"),
-    reason: z.string().trim().min(1).max(300),
-  }),
-  z.strictObject({ kind: z.literal("looksLikeExpense") }),
+const answerableQuestionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("aggregate"),
     measure: measureSchema,
@@ -126,6 +120,31 @@ export const structuredQuestionSchema = z.discriminatedUnion("kind", [
     order: orderSchema,
     limit: limitSchema.default(1),
     filters: questionFiltersSchema.default({}),
+  }),
+]);
+
+/**
+ * What a parser is allowed to hand back for a question.
+ *
+ * A discriminated union, so an invented `kind` is refused by the shape rather
+ * than falling through a switch into whichever branch happens to be last. This
+ * is the check that makes the grammar a real boundary instead of a description
+ * of one — everything downstream can assume it is holding one of exactly six
+ * things, and that a compound holds only answerable parts.
+ */
+export const structuredQuestionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("unsupported"),
+    reason: z.string().trim().min(1).max(300),
+  }),
+  z.strictObject({ kind: z.literal("looksLikeExpense") }),
+  ...answerableQuestionSchema.options,
+  z.strictObject({
+    kind: z.literal("compound"),
+    // Capped for the same reason limits are capped everywhere else: a sentence
+    // claiming twelve questions is a runaway, not a question.
+    parts: z.array(answerableQuestionSchema).min(1).max(4),
+    unanswered: z.array(z.string().trim().min(1).max(40)).max(4).default([]),
   }),
 ]);
 
