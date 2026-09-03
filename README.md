@@ -325,6 +325,42 @@ the machine making the connection.
   `AI_TIMEOUT_MS` defaults to 15 — so with a real API key configured, the default would kill
   the request before the app's own timeout could fall back to the mock.
 
+
+## Looking at a period other than this one
+
+Every option in the dropdown used to be anchored to today, so there was no way to summarise
+July. Two controls now do two jobs: **the dropdown chooses how long a block is** — a week, a
+month, a quarter — and **the arrows choose which block of that size**. Seven names in the menu
+however far back you walk, rather than fourteen entries in one list.
+
+The current block runs to today. A stepped one is **complete**: August means 1 to 31 August,
+because there is nothing partial about a month that is over. That is also what makes the
+comparison honest — a whole August against a whole July is like for like. The exact dates are
+always written under the control, since neither "This month" nor "August 2026" says where a
+partial block stops.
+
+Labels are absolute once stepped — "August 2026", "Q2 2026", "2025" — never "last month".
+Relative names are readable exactly once, and "three quarters ago" collides with the period
+actually called three quarters.
+
+**Custom range** takes two dates for anything the named periods cannot express, and gets no
+comparison. "1 June to 15 July" has a perfectly well-defined stretch before it — the 45 days
+ending 31 May — with real spending in it. It is simply a stretch nobody chose, and a percentage
+against it invites a conclusion from an accident of arithmetic. The card says so rather than
+showing a dash, in the same way it distinguishes "nothing recorded then" from "too little to
+compare". Custom ranges have no arrows either: stepping one would have to invent a stride, and
+every answer guesses at what somebody who typed two exact dates wanted next.
+
+Everything on the page follows the selection — cards, written summary, question box, pie,
+expenses list — **including the trend line, which did not before.** It stays fourteen weeks
+wide but now ends where the period ends, so stepping to July shows the fourteen weeks up to 31
+July. Both simpler answers are wrong: pinned to today it is one chart on a July dashboard
+describing September, and squeezed into the period it draws "today" as a single point.
+
+The day view is the deliberate exception. It has its own date picker and answers a different
+question — what was spent on one named day — and moving to another day is meant not to refetch
+the charts.
+
 ## The AI safety pattern
 
 **The AI never writes to the database.** This is the rule the whole project is arranged
@@ -560,8 +596,9 @@ GET    /api/expenses/:id
 PATCH  /api/expenses/:id      change any field; omitted fields are left alone
 DELETE /api/expenses/:id
 GET    /api/analytics/summary   from, to; defaults to this month, vs the days before it
+                                compare=false for a range with no natural predecessor
 GET    /api/analytics/categories  from, to; defaults to this month
-GET    /api/analytics/trend       from, to; weekly buckets, fourteen weeks by default
+GET    /api/analytics/trend       from, to; weekly buckets, fourteen weeks ending where the period does
 GET    /api/categories          the categories, with how many expenses each holds
 POST   /api/categories          add one
 PATCH  /api/categories/:name    rename it, and every expense filed under it
@@ -593,9 +630,6 @@ one that admits the gaps.
   three methods against the same Zod schemas, and every one of them has only ever been
   exercised through the mock. There has been no API key on this machine, so "it works with a
   real model" is a claim this repository has not earned.
-- **The trend chart ignores the period dropdown.** Deliberate — it is about change over a long
-  run, and squeezing it into "today" would leave a single point — but it does mean one chart on
-  the page is describing a different window from everything around it.
 
 ## Deliberately out of scope
 

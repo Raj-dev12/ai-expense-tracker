@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AskAnswer, MonthlySummary as Summary } from "../api";
-import { PERIODS, PERIOD_LABELS, type Period } from "../periods";
+import { selectionLabel, selectionShortName, type Selection } from "../periods";
+import { PeriodPicker } from "./PeriodPicker";
 
 /**
  * Two ways of asking the AI about the selected period, in one card.
@@ -30,8 +31,8 @@ function credit(provider: string): string {
 }
 
 export function AnalysisCard({
-  period,
-  onPeriodChange,
+  selection,
+  onSelectionChange,
   summary,
   writtenAt,
   loading,
@@ -49,8 +50,8 @@ export function AnalysisCard({
    * the slices, the sentence and the answer on screen are always about the same
    * stretch of time.
    */
-  period: Period;
-  onPeriodChange: (period: Period) => void;
+  selection: Selection;
+  onSelectionChange: (next: Selection) => void;
   summary: Summary | null;
   /**
    * When the summary came back.
@@ -75,19 +76,11 @@ export function AnalysisCard({
   return (
     <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
-        <div className="flex items-baseline gap-2">
-          <select
-            value={period}
-            onChange={(event) => onPeriodChange(event.target.value as Period)}
-            className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-slate-900 ring-1 ring-slate-200 outline-none transition focus:ring-2 focus:ring-accent"
-          >
-            {PERIODS.map((name) => (
-              <option key={name} value={name}>
-                {PERIOD_LABELS[name]}
-              </option>
-            ))}
-          </select>
-          <h2 className="text-base font-medium text-slate-900">in words</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodPicker selection={selection} onChange={onSelectionChange} />
+          <h2 className="text-base font-medium text-slate-900">
+            {selectionLabel(selection)} in words
+          </h2>
         </div>
         <button
           type="button"
@@ -95,7 +88,7 @@ export function AnalysisCard({
           disabled={loading}
           className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {loading ? "Writing..." : summary ? "Write it again" : "Summarise this month"}
+          {loading ? "Writing..." : summary ? "Write it again" : `Summarise ${selectionShortName(selection)}`}
         </button>
       </header>
 

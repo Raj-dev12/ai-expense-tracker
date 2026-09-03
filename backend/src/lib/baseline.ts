@@ -24,7 +24,22 @@ export type Baseline =
   /** Nothing at all was recorded then. */
   | "empty"
   /** Something was, but too little for a percentage to mean anything. */
-  | "too-small";
+  | "too-small"
+  /**
+   * The caller said this window has nothing meaningful to compare against.
+   *
+   * A custom date range is the case that needs it. "1 June to 15 July" has a
+   * perfectly well-defined stretch before it — the 45 days ending 31 May — with
+   * real spending in it, so none of the reasons above apply. It is simply a
+   * stretch nobody chose, and a percentage against it invites a conclusion from
+   * an accident of arithmetic. Every named period has a natural predecessor;
+   * an arbitrary range does not.
+   *
+   * Decided by the caller rather than worked out from the dates, because
+   * "does this window have a natural predecessor" is a question about how it was
+   * chosen, and the dates no longer remember that.
+   */
+  | "not-comparable";
 
 export function baselineFor(previousCount: number, previousTotal: number): Baseline {
   if (previousCount === 0 || previousTotal <= 0) return "empty";

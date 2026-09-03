@@ -23,10 +23,12 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
     const query = validate(summaryQuerySchema, request.query, "parameters");
     const { id: userId } = await getDemoUser();
 
-    if (!query.from && !query.to) return monthToDate(userId);
+    const compare = query.compare === "true";
+
+    if (!query.from && !query.to && compare) return monthToDate(userId);
 
     const today = todayIso();
-    return periodFigures(userId, query.from ?? startOfMonth(today), query.to ?? today);
+    return periodFigures(userId, query.from ?? startOfMonth(today), query.to ?? today, { compare });
   });
 
   /** What the pie chart draws: one slice per category that has anything in it. */

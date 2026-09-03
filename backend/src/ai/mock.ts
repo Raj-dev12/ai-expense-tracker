@@ -136,6 +136,8 @@ export const mockParser: ExpenseParser = {
       );
     } else if (baseline === "empty") {
       sentences.push("There is nothing in the stretch before it to compare against.");
+    } else if (baseline === "not-comparable") {
+      sentences.push("A range you chose yourself has nothing natural to compare against.");
     } else {
       sentences.push(
         "There is too little in the stretch before it for a comparison to mean anything.",

@@ -252,6 +252,43 @@ Found by using it, not by testing it. Each was investigated before anything was 
       tools, and the folded set confirmed end to end against a real database — tooltip €116.60
       across 5, click-through €116.60 across 5
 
+
+## Period navigation
+
+Asked for after the deployment fixes. The dropdown was anchored to today, so July was
+unreachable.
+
+- [x] The period is a *selection* now, not a period name: a named block plus an offset, or a
+      custom range. `windowForSelection` is the one place that turns it into dates
+- [x] Back and forward arrows step the block. Forward stops at the present — there is no
+      spending in the future, and walking into empty months invites the wrong question
+- [x] A stepped block is complete (1–31 August) while the current one runs to today. That is
+      what makes the comparison like for like: a whole August against a whole July
+- [x] Month arithmetic never touches a `Date`. `setMonth` rolls over rather than clamping —
+      31 March minus one month is 3 March — so whole months are shifted as numbers and the day
+      is attached afterwards
+- [x] Labels are absolute once stepped: "August 2026", "Q2 2026", "2025". Never "last month",
+      which is readable once, and never "three quarters ago", which collides with the period of
+      that name. The grammar follows too — "Spent in August 2026", "Spent on 2 Sep 2026"
+- [x] Custom range: two date inputs, each bounded by the other so a range cannot be typed
+      backwards. No arrows, because stepping one would have to invent a stride
+- [x] A custom range gets no comparison. `compare=false` on the summary endpoint and in the
+      written summary; the card says "No comparison for a custom range" rather than showing a
+      dash, which would be indistinguishable from the two silences already there
+- [x] The trend line follows the period's *end* while staying fourteen weeks wide. This retires
+      the "trend chart ignores the dropdown" entry from the not-built list rather than deepening
+      it — pinned to today it would have been one chart on a July dashboard describing September
+- [x] The expenses list follows the period too. It had been asking for the most recent expenses
+      regardless, invisible while every period ended today and plainly wrong once you could step
+      back and read September's rows under a July dashboard
+- [x] The day view stays independent, as documented — its own picker, its own question
+- [x] Found while verifying: a check counted every `<button>` in the analysis card and expected
+      one, which was about there being a single *primary* action. The period arrows are neutral
+      controls that compete with nothing, so it now counts accent-coloured buttons and does not
+      drift when another quiet control is added
+- [x] Verified: 138 backend tests, 40 new period checks, the full cycle check, all seven MCP
+      tools, and a complete August comparing against a complete July (−7.8%) end to end
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

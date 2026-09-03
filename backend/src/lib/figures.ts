@@ -5,7 +5,7 @@ import { expenses } from "../db/schema.js";
 import { HttpError } from "./http-error.js";
 import { toMoneyString } from "./money.js";
 import { addDays, daysBetween, startOfMonth, todayIso } from "./dates.js";
-import { baselineFor } from "./baseline.js";
+import { baselineFor, type Baseline } from "./baseline.js";
 
 /**
  * The month's numbers, worked out in exactly one place.
@@ -134,7 +134,12 @@ export type PeriodFigures = Awaited<ReturnType<typeof periodFigures>>;
  * days into a quarter, "this quarter versus last quarter" would show spending
  * collapsing by 97% — an artefact of the calendar rather than information.
  */
-export async function periodFigures(userId: string, from: string, to: string) {
+export async function periodFigures(
+  userId: string,
+  from: string,
+  to: string,
+  options: { compare?: boolean } = {},
+) {
   const daysElapsed = daysBetween(from, to);
 
   const previousEnd = addDays(from, -1);
@@ -147,7 +152,10 @@ export async function periodFigures(userId: string, from: string, to: string) {
 
   const currentTotal = Number(current.total);
   const previousTotal = Number(previous.total);
-  const baseline = baselineFor(previous.count, previousTotal);
+  // The caller can say the window has no natural predecessor — a custom range
+  // does not — in which case there is nothing to work out.
+  const baseline =
+    options.compare === false ? "not-comparable" : baselineFor(previous.count, previousTotal);
 
   return {
     from,
@@ -165,7 +173,7 @@ export async function periodFigures(userId: string, from: string, to: string) {
     // Whether the stretch before is enough of a sample to compare against, and
     // why not when it is not. Worked out in lib/baseline.ts so the rule exists
     // once and can be tested without a database.
-    baseline,
+    baseline: baseline as Baseline,
     // Null rather than zero or Infinity when there is nothing worth comparing
     // with: "no change", "nothing to compare" and "not enough to compare" are
     // three different things, and the page should be able to say which.

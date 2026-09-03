@@ -1,6 +1,5 @@
 import type { Summary } from "../api";
 import { formatDayMonth, formatMoney } from "../format";
-import { PERIOD_NOUNS, type Period } from "../periods";
 
 /**
  * Four numbers, shown as numbers.
@@ -45,13 +44,21 @@ function Card({
 export function SummaryCards({
   summary,
   currency,
-  period,
+  phrase,
 }: {
   summary: Summary;
   currency: string;
-  period: Period;
+  /**
+   * The window as it reads after "Spent": "this month", "in August 2026", "on
+   * 1 Sep 2026", "from 1 Jun to 15 Jul 2026".
+   *
+   * A phrase rather than a period name, because the cards now describe blocks
+   * that are not "this" anything. Built in periods.ts so the grammar lives with
+   * the calendar logic rather than being reassembled here.
+   */
+  phrase: string;
 }) {
-  const noun = PERIOD_NOUNS[period];
+  const noun = phrase;
   const days = `${summary.daysElapsed} ${summary.daysElapsed === 1 ? "day" : "days"}`;
   const before = `${formatDayMonth(summary.previous.from)} – ${formatDayMonth(summary.previous.to)}`;
 
@@ -81,7 +88,9 @@ export function SummaryCards({
       ? `${change >= 0 ? "↑" : "↓"} ${Math.abs(change)}% against ${before}`
       : summary.baseline === "empty"
         ? `Nothing recorded in ${before}`
-        : `Too little in ${before} to compare`;
+        : summary.baseline === "not-comparable"
+          ? "No comparison for a custom range"
+          : `Too little in ${before} to compare`;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

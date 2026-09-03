@@ -331,7 +331,7 @@ const summarySchema = z.object({
   changePercent: z.number().nullable(),
   // Why there is no percentage, when there is none. "empty" and "too-small" are
   // different silences and the card says which.
-  baseline: z.enum(["usable", "empty", "too-small"]),
+  baseline: z.enum(["usable", "empty", "too-small", "not-comparable"]),
 });
 
 const categoryBreakdownSchema = z.object({
@@ -358,12 +358,18 @@ export type CategorySlice = CategoryBreakdown["categories"][number];
 export type TrendPoint = Trend["points"][number];
 
 /** A window, defaulting on the server to this calendar month so far. */
-export function getSummary(window?: { from: string; to: string }): Promise<Summary> {
-  const query = window ? `?from=${window.from}&to=${window.to}` : "";
-  return request(`/api/analytics/summary${query}`, summarySchema);
+/** A window, plus whether comparing it with the stretch before means anything. */
+export type Window = { from: string; to: string; compare?: boolean };
+
+export function getSummary(window?: Window): Promise<Summary> {
+  if (!window) return request("/api/analytics/summary", summarySchema);
+  const query = new URLSearchParams({ from: window.from, to: window.to });
+  // Only sent when it is false, so an ordinary period's request is unchanged.
+  if (window.compare === false) query.set("compare", "false");
+  return request(`/api/analytics/summary?${query}`, summarySchema);
 }
 
-export function getCategories(window?: { from: string; to: string }): Promise<CategoryBreakdown> {
+export function getCategories(window?: Window): Promise<CategoryBreakdown> {
   const query = window ? `?from=${window.from}&to=${window.to}` : "";
   return request(`/api/analytics/categories${query}`, categoryBreakdownSchema);
 }
@@ -402,8 +408,9 @@ export function setBaseCurrency(baseCurrency: string): Promise<BaseCurrencyChang
   });
 }
 
-export function getTrend(): Promise<Trend> {
-  return request("/api/analytics/trend", trendSchema);
+export function getTrend(window?: { from: string; to: string }): Promise<Trend> {
+  const query = window ? `?from=${window.from}&to=${window.to}` : "";
+  return request(`/api/analytics/trend${query}`, trendSchema);
 }
 
 // --- the monthly summary -----------------------------------------------------
@@ -462,9 +469,11 @@ export function askQuestion(
 }
 
 /** Ask for a written summary of a window. Saves nothing. */
-export function getMonthlySummary(window?: { from: string; to: string }): Promise<MonthlySummary> {
+export function getMonthlySummary(window?: Window): Promise<MonthlySummary> {
   return request("/api/ai/monthly-summary", monthlySummarySchema, {
     method: "POST",
-    body: JSON.stringify(window ?? {}),
+    body: JSON.stringify(
+      window ? { from: window.from, to: window.to, ...(window.compare === false ? { compare: false } : {}) } : {},
+    ),
   });
 }

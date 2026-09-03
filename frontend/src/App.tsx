@@ -30,7 +30,13 @@ import {
   type Trend,
 } from "./api";
 import { formatMoney, todayIso } from "./format";
-import { windowFor, type Period } from "./periods";
+import {
+  THIS_MONTH,
+  trendWindowFor,
+  selectionPhrase,
+  windowForSelection,
+  type Selection,
+} from "./periods";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
@@ -96,16 +102,20 @@ export default function App() {
    * working perfectly well.
    */
   /**
-   * The window the summary cards, the written summary and the pie all describe.
+   * The window everything on the dashboard describes.
    *
-   * One piece of state for three things on purpose: numbers, prose and slices
-   * that could disagree about which stretch of time they cover would be worse
-   * than having no period control at all.
+   * One piece of state on purpose: numbers, prose, slices and rows that could
+   * disagree about which stretch of time they cover would be worse than having
+   * no period control at all.
    *
-   * The trend chart deliberately does not follow it. That chart is about change
-   * over a long run, and squeezing it into "today" would leave a single point.
+   * It is a selection rather than a period now, so it can hold "August" as well
+   * as "this month" — the dropdown chooses how long a block is and the arrows
+   * choose which block. The trend line follows it too, which it did not before:
+   * it stays fourteen weeks wide, but ends where this window ends rather than
+   * always at today. A long-run chart pinned to today under a dashboard showing
+   * July was the one thing on the page describing a different stretch of time.
    */
-  const [period, setPeriod] = useState<Period>("month");
+  const [selection, setSelection] = useState<Selection>(THIS_MONTH);
 
   const [monthly, setMonthly] = useState<MonthlySummaryResponse | null>(null);
   const [monthlyAt, setMonthlyAt] = useState<Date | null>(null);
@@ -218,15 +228,22 @@ export default function App() {
    */
   const refresh = useCallback(async () => {
     setWrites((count) => count + 1);
-    const window = windowFor(period);
+    const window = windowForSelection(selection);
+    // A range somebody typed has no natural stretch before it to compare
+    // against — see the note on the change card.
+    const compare = selection.kind !== "custom";
 
     try {
       const [list, nextSummary, nextCategories, nextTrend, settings, allCategories] =
         await Promise.all([
-              listExpenses({ limit: EXPENSE_LIMIT }),
-          getSummary(window),
+          // The list follows the period like everything else. It used to ask
+          // for the most recent expenses regardless, which was invisible while
+          // every period ended today and plainly wrong the moment you could
+          // step back to July and read September's rows underneath it.
+          listExpenses({ ...window, limit: EXPENSE_LIMIT }),
+          getSummary({ ...window, compare }),
           getCategories(window),
-          getTrend(),
+          getTrend(trendWindowFor(selection)),
           getSettings(),
           getCategoryList(),
         ]);
@@ -245,7 +262,7 @@ export default function App() {
     } finally {
       setLoaded(true);
     }
-  }, [period]);
+  }, [selection]);
 
   useEffect(() => {
     void refresh();
@@ -490,8 +507,8 @@ export default function App() {
   // rebuilt on every render of the page.
   const dismissPieCategory = useCallback(() => setPieSlice(null), []);
 
-  function handlePeriodChange(next: Period) {
-    setPeriod(next);
+  function handlePeriodChange(next: Selection) {
+    setSelection(next);
     // The sentence on screen describes the period that was selected when it was
     // written. Leaving it there under a new heading would be the card claiming
     // to summarise something it never looked at.
@@ -513,7 +530,7 @@ export default function App() {
     try {
       // Scoped to the period the card is showing, unless the question names its
       // own dates — in which case the parser fills them in and they win.
-      setAnswer(await askQuestion(question, windowFor(period)));
+      setAnswer(await askQuestion(question, windowForSelection(selection)));
     } catch (caught) {
       setAskError(caught instanceof ApiError ? caught.message : "Could not answer that");
     } finally {
@@ -530,7 +547,12 @@ export default function App() {
     try {
       // Reads figures, returns prose, saves nothing — api.ts asserts the
       // `saved: false` the endpoint promises, exactly as it does for a parse.
-      setMonthly(await getMonthlySummary(windowFor(period)));
+      setMonthly(
+        await getMonthlySummary({
+          ...windowForSelection(selection),
+          compare: selection.kind !== "custom",
+        }),
+      );
       setMonthlyAt(new Date());
     } catch (caught) {
       setMonthlyError(
@@ -634,13 +656,13 @@ export default function App() {
         ) : (
           <>
             {summary && (
-              <SummaryCards summary={summary} currency={currency} period={period} />
+              <SummaryCards summary={summary} currency={currency} phrase={selectionPhrase(selection)} />
             )}
 
             {summary && (
               <AnalysisCard
-                period={period}
-                onPeriodChange={handlePeriodChange}
+                selection={selection}
+                onSelectionChange={handlePeriodChange}
                 summary={monthly}
                 writtenAt={monthlyAt}
                 loading={monthlyLoading}

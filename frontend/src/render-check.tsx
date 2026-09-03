@@ -22,7 +22,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createCategory, deleteCategory, deleteExpense, listExpenses } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
 import App from "./App";
-import { windowFor } from "./periods";
+import {
+  canStepForward,
+  selectionLabel,
+  selectionPhrase,
+  step,
+  trendWindowFor,
+  windowFor,
+  windowForSelection,
+  type Period,
+  type Selection,
+} from "./periods";
+import { PeriodPicker } from "./components/PeriodPicker";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
@@ -100,7 +111,7 @@ const summary: Summary = {
   changePercent: -7,
   baseline: "usable",
 };
-const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" period="month" />);
+const cards = renderToStaticMarkup(<SummaryCards summary={summary} currency="EUR" phrase="this month" />);
 check("card: month total", cards.includes("1,836.95"), cards.slice(0, 0));
 check("card: names the period", cards.includes("Spent this month"));
 check("card: count", cards.includes(">31<"));
@@ -126,7 +137,7 @@ const quarterCards = renderToStaticMarkup(
       baseline: "usable",
     }}
     currency="EUR"
-    period="quarter"
+    phrase="this quarter"
   />,
 );
 check("card: a quarter is not called a month anywhere", !/month/i.test(quarterCards), quarterCards.match(/[^<>]*month[^<>]*/i)?.[0] ?? "");
@@ -143,7 +154,7 @@ const dayCards = renderToStaticMarkup(
       baseline: "usable",
     }}
     currency="EUR"
-    period="day"
+    phrase="today"
   />,
 );
 check("card: one day is singular", dayCards.includes("1 day so far") && !dayCards.includes("1 days"));
@@ -153,7 +164,7 @@ const noComparison = renderToStaticMarkup(
   <SummaryCards
     summary={{ ...summary, changePercent: null, baseline: "empty" }}
     currency="EUR"
-    period="month"
+    phrase="this month"
   />,
 );
 check(
@@ -173,7 +184,7 @@ const thinBaseline = renderToStaticMarkup(
   <SummaryCards
     summary={{ ...summary, changePercent: null, baseline: "too-small" }}
     currency="EUR"
-    period="month"
+    phrase="this month"
   />,
 );
 check("card: too little to compare is distinguished from nothing at all", thinBaseline.includes("Too little in"));
@@ -385,8 +396,8 @@ check("list: says how many of how many", list.includes("showing 2 of 97"));
 // a real provider wrote something the mock produced.
 const idle = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={null}
     writtenAt={null}
     loading={false}
@@ -407,8 +418,8 @@ check("summary: says what the button will do", idle.includes("describe this spen
 
 const written = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={{
       provider: "mock",
       saved: false,
@@ -437,8 +448,8 @@ check("summary: offers to rewrite once written", written.includes("Write it agai
 // the field that tells the truth about it.
 const byClaude = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={{ provider: "claude", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
     writtenAt={new Date("2026-08-31T22:41:00Z")}
     loading={false}
@@ -455,8 +466,8 @@ check("summary: does not also claim the mock", !byClaude.includes("mock"));
 
 const failed = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={null}
     writtenAt={null}
     loading={false}
@@ -472,8 +483,8 @@ check("summary: an error is shown in the card", failed.includes("Could not write
 
 const writing = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={null}
     writtenAt={null}
     loading={true}
@@ -565,7 +576,7 @@ check("patch: a comma decimal is understood", commaTyped.amount === 41.5, JSON.s
 // The point of the rename is that nothing says "euro" unless the euro is
 // actually the base, so these render the same fixtures as pounds and check the
 // symbol followed the setting.
-const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="GBP" period="month" />);
+const cardsGbp = renderToStaticMarkup(<SummaryCards summary={summary} currency="GBP" phrase="this month" />);
 check("currency: cards use the base symbol", cardsGbp.includes("£1,836.95"), cardsGbp.match(/[£€][0-9,.]+/)?.[0] ?? "none");
 check("currency: cards do not still say euro", !cardsGbp.includes("€"));
 
@@ -730,8 +741,8 @@ check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.include
 // nothing on the card changed. These assert the two things that now differ.
 const rerunning = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
     writtenAt={new Date("2026-08-31T20:41:00Z")}
     loading={true}
@@ -748,8 +759,8 @@ check("summary: the old sentence is not left sitting there", !rerunning.includes
 
 const reWritten = renderToStaticMarkup(
   <AnalysisCard
-    period="month"
-    onPeriodChange={() => {}}
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
     writtenAt={new Date("2026-08-31T20:41:00Z")}
     loading={false}
@@ -826,8 +837,8 @@ check("period: Q2 starts in April", windowFor("quarter", "2026-05-05").from === 
 
 // 22. The question box.
 const cardProps = {
-  period: "month" as const,
-  onPeriodChange: () => {},
+  selection: { kind: "period" as const, period: "month" as const, offset: 0 },
+  onSelectionChange: () => {},
   summary: null,
   writtenAt: null,
   loading: false,
@@ -843,9 +854,16 @@ check("ask: the box is there", askIdle.includes("Ask about your spending"));
 // The placeholder has to read as a question, because the add box at the top of
 // the page also takes a sentence and that is this feature's one real hazard.
 check("ask: the placeholder asks rather than states", askIdle.includes("highest expense in Travel"));
-// One accent-coloured control in the card. A second button beside the box would
-// be two things competing for the same glance.
-check("ask: the box has no button of its own", (askIdle.match(/<button/g) ?? []).length === 1);
+// One accent-coloured control in the card. A second *primary* button beside the
+// box would be two things competing for the same glance.
+//
+// This counts primary buttons rather than buttons. It used to count every
+// <button> and expect one, which was true until the period arrows arrived —
+// neutral, secondary controls that compete with nothing. Counting the accent
+// colour asserts the thing the rule is actually about, and does not drift when
+// another quiet control is added.
+const primaryButtons = (askIdle.match(/class="[^"]*(?<![-\w])bg-accent(?![-\w])[^"]*"/g) ?? []).length;
+check("ask: the box has no primary button of its own", primaryButtons === 1, String(primaryButtons));
 
 const answered = renderToStaticMarkup(
   <AnalysisCard
@@ -957,3 +975,144 @@ check("ask: the signpost points at the add box", signposted.includes("box at the
 }
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nall checks passed");
+
+// 23. Stepping the period.
+//
+// Every option used to be anchored to today, so there was no way to look at
+// July. The dropdown now chooses how long a block is and the arrows choose
+// which block.
+const TODAY = "2026-09-03";
+const sel = (period: Period, offset: number): Selection => ({ kind: "period", period, offset });
+
+check(
+  "period: the current block runs to today, not to the end of the month",
+  windowForSelection(sel("month", 0), TODAY).to === TODAY,
+);
+// A stepped block is complete. This is what makes the comparison honest: a whole
+// August against a whole July, rather than "1 August to the 3rd" against a
+// stretch of the same odd length.
+check(
+  "period: a stepped block is complete, not partial",
+  windowForSelection(sel("month", -1), TODAY).from === "2026-08-01" &&
+    windowForSelection(sel("month", -1), TODAY).to === "2026-08-31",
+  JSON.stringify(windowForSelection(sel("month", -1), TODAY)),
+);
+// Stepping back from the 3rd of a month must not skip February or land on the
+// 3rd of nowhere. The month arithmetic never touches a Date for this reason.
+check(
+  "period: stepping back over short months lands on real blocks",
+  windowForSelection(sel("month", -6), TODAY).from === "2026-03-01" &&
+    windowForSelection(sel("month", -6), TODAY).to === "2026-03-31",
+  JSON.stringify(windowForSelection(sel("month", -6), TODAY)),
+);
+check(
+  "period: quarters step by three months and end on the quarter",
+  windowForSelection(sel("quarter", -1), TODAY).from === "2026-04-01" &&
+    windowForSelection(sel("quarter", -1), TODAY).to === "2026-06-30",
+);
+check(
+  "period: a year steps to the whole previous year",
+  windowForSelection(sel("year", -1), TODAY).from === "2025-01-01" &&
+    windowForSelection(sel("year", -1), TODAY).to === "2025-12-31",
+);
+// There is no spending in the future, so forward stops at the present rather
+// than walking into empty months.
+check("period: forward is blocked at the present", !canStepForward(sel("month", 0)));
+check("period: forward is offered once stepped back", canStepForward(sel("month", -1)));
+check(
+  "period: stepping forward never passes the present",
+  step(sel("month", 0), 1).kind === "period" &&
+    (step(sel("month", 0), 1) as { offset: number }).offset === 0,
+);
+
+// Absolute names, never relative ones. "Last month" is readable exactly once and
+// "three quarters ago" collides with the period actually called three quarters.
+check("period: unstepped keeps the name it always had", selectionLabel(sel("month", 0), TODAY) === "This month");
+check("period: a stepped month names itself", selectionLabel(sel("month", -1), TODAY) === "August 2026");
+check("period: a stepped quarter names itself", selectionLabel(sel("quarter", -1), TODAY) === "Q2 2026");
+check("period: a stepped year names itself", selectionLabel(sel("year", -1), TODAY) === "2025");
+check(
+  "period: no label says 'last' or 'ago'",
+  !/\b(last|ago)\b/i.test(
+    [sel("month", -1), sel("quarter", -2), sel("year", -1), sel("week", -1), sel("day", -1)]
+      .map((s) => selectionLabel(s, TODAY))
+      .join(" "),
+  ),
+);
+// The grammar has to survive stepping too: "Spent this month" was fine and
+// "Spent August 2026" is not a sentence.
+check("period: the phrase keeps its preposition", selectionPhrase(sel("month", -1), TODAY) === "in August 2026");
+check("period: a single day takes 'on'", selectionPhrase(sel("day", -1), TODAY) === "on 2 Sep 2026");
+check("period: unstepped phrasing is unchanged", selectionPhrase(sel("month", 0), TODAY) === "this month");
+
+const custom: Selection = { kind: "custom", from: "2026-06-01", to: "2026-07-15" };
+check("period: a custom range is its own window", JSON.stringify(windowForSelection(custom, TODAY)) === JSON.stringify({ from: "2026-06-01", to: "2026-07-15" }));
+check("period: a custom range writes the year once", selectionLabel(custom, TODAY) === "1 Jun – 15 Jul 2026");
+check("period: a custom range cannot be stepped", !canStepForward(custom) && step(custom, -1) === custom);
+
+// The trend stays fourteen weeks wide but ends where the period ends. Pinned to
+// today it was the one chart on a July dashboard describing September.
+const trendNow = trendWindowFor(sel("month", 0), TODAY);
+const trendThen = trendWindowFor(sel("month", -1), TODAY);
+check("period: the trend ends where the period ends", trendNow.to === TODAY && trendThen.to === "2026-08-31");
+// Fourteen weeks wide always, but ending where the period ends. The exact start
+// is the Monday of the week the period ends in, so two windows ending in the
+// same week share it — 31 August and 3 September do, which is why this asserts
+// the width rather than a pair of literal dates.
+const spanDays = (w: { from: string; to: string }) =>
+  Math.round((Date.parse(w.to) - Date.parse(w.from)) / 86_400_000);
+const trendJuly = trendWindowFor(sel("month", -2), TODAY);
+check(
+  "period: the trend stays fourteen weeks wide however far back it goes",
+  [trendNow, trendThen, trendJuly].every((w) => spanDays(w) >= 91 && spanDays(w) <= 97),
+  [trendNow, trendThen, trendJuly].map(spanDays).join(", ") + " days",
+);
+check(
+  "period: stepping to a different week moves the trend with it",
+  trendJuly.to === "2026-07-31" && trendJuly.from === "2026-04-27",
+  `${trendJuly.from} .. ${trendJuly.to}`,
+);
+
+// The picker itself.
+const periodPicker = renderToStaticMarkup(
+  <PeriodPicker selection={sel("month", 0)} onChange={() => {}} today={TODAY} />,
+);
+check("periodPicker: the arrows are reachable by name", periodPicker.includes('aria-label="Previous period"') && periodPicker.includes('aria-label="Next period"'));
+check("periodPicker: forward is disabled at the present", /aria-label="Next period"[^>]* disabled=""/.test(periodPicker));
+check("periodPicker: a custom range is offered", periodPicker.includes(">Custom range</option>"));
+// The exact dates are always written out: "This month" does not say where a
+// partial block stops, and "August 2026" does not say it is complete.
+check("periodPicker: the window's dates are shown", periodPicker.includes("1 Sep") && periodPicker.includes("3 Sep"));
+
+const steppedPicker = renderToStaticMarkup(
+  <PeriodPicker selection={sel("month", -1)} onChange={() => {}} today={TODAY} />,
+);
+// `disabled=""` precisely: the button's own Tailwind classes contain the word
+// "disabled" (disabled:cursor-not-allowed), so a looser match reads every arrow
+// as disabled and the check passes for the wrong reason.
+check("periodPicker: forward is offered once stepped back", !/aria-label="Next period"[^>]* disabled=""/.test(steppedPicker));
+check("periodPicker: a stepped window shows its real dates", steppedPicker.includes("1 Aug") && steppedPicker.includes("31 Aug"));
+
+const customPicker = renderToStaticMarkup(
+  <PeriodPicker selection={custom} onChange={() => {}} today={TODAY} />,
+);
+check("periodPicker: a custom range offers two date boxes", (customPicker.match(/type="date"/g) ?? []).length === 2);
+// Typing a range end-first would otherwise describe a window running backwards,
+// and the charts would empty for a reason nobody could see.
+check("periodPicker: the range cannot be typed backwards", customPicker.includes('max="2026-07-15"') && customPicker.includes('min="2026-06-01"'));
+check("periodPicker: a custom range hides the arrows", !customPicker.includes('aria-label="Previous period"'));
+
+// The third silence on the change card. A custom range has a perfectly
+// well-defined stretch before it, with real spending in it — it is simply a
+// stretch nobody chose.
+const customCards = renderToStaticMarkup(
+  <SummaryCards
+    summary={{ ...summary, changePercent: null, baseline: "not-comparable" }}
+    currency="EUR"
+    phrase="from 1 Jun to 15 Jul 2026"
+  />,
+);
+check("card: a custom range says why there is no comparison", customCards.includes("No comparison for a custom range"));
+check("card: a custom range shows no percentage", !/\d+%/.test(customCards));
+check("card: the three silences all read differently", !customCards.includes("Nothing recorded in") && !customCards.includes("Too little in"));
+check("card: a stepped window is named in the cards", customCards.includes("Spent from 1 Jun to 15 Jul 2026"));

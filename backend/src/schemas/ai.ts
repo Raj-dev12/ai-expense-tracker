@@ -49,6 +49,8 @@ export type ExpenseSuggestionOutput = z.infer<typeof expenseSuggestionSchema>;
  * rule the analytics query strings follow.
  */
 export const monthlySummaryRequestSchema = z.strictObject({
+  /** As on the summary endpoint. A JSON body can carry a real boolean. */
+  compare: z.boolean().default(true),
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
 });

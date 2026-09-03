@@ -221,8 +221,10 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
 
     const today = todayIso();
     const figures =
-      input.from || input.to
-        ? await periodFigures(userId, input.from ?? startOfMonth(today), input.to ?? today)
+      input.from || input.to || !input.compare
+        ? await periodFigures(userId, input.from ?? startOfMonth(today), input.to ?? today, {
+            compare: input.compare,
+          })
         : await monthToDate(userId);
 
     const categories = await categoryTotalsBetween(userId, figures.from, figures.to);
