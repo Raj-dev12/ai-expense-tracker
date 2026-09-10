@@ -1292,6 +1292,8 @@ want when someone asks you about the project in six months.
 | Grey, not black and white | Contrast stretched, thresholding left to Tesseract | Tesseract binarises internally and does it better from grey than from something already reduced to two values. Preprocessing should make the letters separable, not make the decision. |
 | A blank total says which kind of blank it is | "No total found" against "read as 2490.00, and that looks wrong" | Both leave the box empty, which is right, and both were reported as indistinguishable, which was fair — the difference was buried in a sentence. They ask different things of the person: go and find the figure, or adjudicate between two of them. The kind now leads, and is repeated beside the box, because the box is where the eye is when it is empty. |
 | The shop name is trimmed at the ends only | Marks inside a name are kept | A logo, a border or a torn edge at the top of a receipt reports as text, and arrived as symbols wrapped round the name. But "K-MARKET" flattened to "KMARKET" would look correct and be wrong, which is worse than a stray character somebody can see and delete. |
+| A failure shows what failed, not only what kind of failure it was | The canned sentence, and the server’s own words under it | The scanner kept the category and discarded the message. A phone was told "the server could not be reached" while the server was replying `No route for POST /api/receipts/read` — a sentence that names the problem outright. Three rounds went into EXIF orientation, resolution and JPEG quality, none of which were involved. A category is for deciding what to do; the detail is for working out what happened, and debugging needs both. |
+| A frontend preview cannot exercise backend changes | `vercel.json` rewrites take a fixed string and do not interpolate environment variables | Every frontend deployment, preview included, rewrites `/api` to the backend’s *production* domain. A branch changing both halves can only be tested with half of it deployed. Not a bug in anything — Vercel behaves correctly at every step — which is what makes it expensive: the rewrite lands, the backend answers, and the answer is a 404. |
 | Every core variant is vendored, not the one that was observed | All six, ~31 MB | Tesseract chooses at runtime between relaxed SIMD, SIMD and plain builds on what the browser supports, so the file it asks for is not knowable from one machine. Five were shipped, the browser asked for the sixth, and OCR never started. The required list is now read out of tesseract.js's own source by a check, so it cannot drift from what the library actually requests. |
 | Tesseract assets are self-hosted | ~31 MB in `frontend/public/tesseract/` | A CDN would keep the repository small and make scanning quietly dependent on a third party being reachable — offline or behind a restrictive network it would stop working with no way to tell why from inside the app. Both language files are shipped because the Finnish ones earn their size on YHTEENSÄ, ALV and the ä in a shop's name. |
 | tesseract.js, loaded on demand | The dependency, and why | It is the only WebAssembly OCR engine that runs in a browser with no service behind it, which the no-API-key rule requires. The alternative considered was a vision model, which would have been more accurate and needed a key and a paid service — it stays available as a second `ReceiptExtractor`, behind the same interface. Imported with a dynamic `import()` so several megabytes stay out of the first paint. |
@@ -3386,6 +3388,34 @@ Worth naming as a pattern: **the absence of a step is invisible in a way a wrong
 Nothing in the code said "no preprocessing"; there was simply nothing there, and nothing there
 looks the same as nothing needed. A wrong choice can be read and argued with. A missing one has
 to be asked about, which is what happened.
+
+**Three rounds spent on the wrong half of the system**
+
+A phone reported that receipt scanning failed. Desktop worked. The obvious reading was image
+quality — a phone camera, a crumpled receipt — and two rounds went into EXIF orientation,
+downscaling, greyscale and contrast, plus a long honest assessment of whether Tesseract can read
+thermal paper at all.
+
+None of it was involved. OCR had worked on the phone every time. The call to the backend was
+failing, because a frontend branch preview rewrites `/api` to the backend’s *production*
+domain, and production was built from `master`, which had no `/api/receipts/read`. A 404, from a
+healthy server, behaving exactly as configured.
+
+**What hid it was a message that named the wrong cause.** The scanner showed "the server could
+not be reached". The server had been reached; it had replied `No route for POST
+/api/receipts/read`. That string was constructed, carried through two layers, and then thrown
+away one line before it reached the screen, in favour of a category.
+
+Two lessons, and the second is the sharper one:
+
+- A message that names a cause has to be **right** about the cause. "Could not be reached" is not
+  a softer way of saying "returned an error"; it points somewhere else entirely, and people go
+  and look there.
+- **Distinguishing failures by kind is not enough if the kinds are coarser than the causes.**
+  Making the messages distinct was the change that made this visible at all — the phone stopped
+  saying "could not be read" and started saying "the server could not be reached", which is what
+  redirected the search. But the kind was still one bucket holding "unreachable", "404" and "the
+  response was not JSON", which are three different afternoons.
 
 **A verification that tested my own list instead of the requirement**
 

@@ -40,7 +40,8 @@ import { readCollapsed, type PanelId } from "./panels";
 import { ReceiptDebug } from "./components/ReceiptDebug";
 import { ReceiptImage } from "./components/ReceiptImage";
 import { ReceiptReview } from "./components/ReceiptReview";
-import { ReceiptScanner } from "./components/ReceiptScanner";
+import { ReceiptScanner, describeFailure } from "./components/ReceiptScanner";
+import { ReceiptError } from "./receipts/extractor";
 import type { ReceiptData, TotalVerdict } from "./api";
 import { PeriodPicker } from "./components/PeriodPicker";
 import { Calendar } from "./components/Calendar";
@@ -1944,3 +1945,40 @@ const splitName = renderToStaticMarkup(
   />,
 );
 check("box: a long piece of a name still matches", splitName.includes('data-marked="Shop"'));
+
+// 36. The server's own words survive to the screen.
+//
+// This is the code that told a phone "the server could not be reached" while the
+// server was replying `No route for POST /api/receipts/read`. The category was
+// kept and the sentence that named the problem was thrown away, and three rounds
+// of guessing followed — at EXIF orientation, image resolution and JPEG quality,
+// none of which were involved.
+const routeMissing = describeFailure(
+  new ReceiptError("check-failed", "No route for POST /api/receipts/read"),
+);
+check("detail: the kind still decides what to do", routeMissing.message.includes("checking it with the server"));
+check("detail: and the server's own words are kept", routeMissing.detail === "No route for POST /api/receipts/read");
+
+// The reworded sentence. It used to name a cause — "could not be reached" — that
+// was false in the case that actually happened, and a message naming the wrong
+// cause sends people to look in the wrong place.
+check("detail: it no longer claims the server was unreachable", !routeMissing.message.includes("could not be reached"));
+
+// The other failure this is indistinguishable from without the detail: a rewrite
+// that did not land, so /api/... fell through to the SPA and returned HTML.
+const gotHtml = describeFailure(
+  new ReceiptError("check-failed", "The server sent something this page did not expect"),
+);
+check("detail: two failures of one kind still read differently", gotHtml.detail !== routeMissing.detail);
+check("detail: while sharing what to do about them", gotHtml.message === routeMissing.message);
+
+// Nothing repeated. A canned sentence echoed underneath itself is noise.
+const noExtra = describeFailure(
+  new ReceiptError("no-text", "The text reader ran, but found no text on that photo."),
+);
+check("detail: a message that adds nothing is not repeated", noExtra.detail === null);
+
+// Something thrown that is not an Error at all.
+const odd = describeFailure("something odd");
+check("detail: a non-error still gets a sentence", odd.message.length > 0);
+check("detail: and claims no detail it does not have", odd.detail === null);

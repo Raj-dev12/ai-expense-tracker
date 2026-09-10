@@ -267,6 +267,42 @@ Hardcoding a deployment URL here works exactly once, then breaks silently the ne
 backend is deployed — the frontend keeps rewriting to an address that still exists and still
 answers, but is running last week's code. Project settings, under Domains, name the stable one.
 
+### A frontend preview cannot exercise backend changes
+
+Worth knowing before it costs you an afternoon, because it did.
+
+That rewrite destination is a **fixed string in a committed file**, and `vercel.json` does not
+interpolate environment variables. So every deployment of the frontend project — production,
+and every branch preview — rewrites `/api` to the same place: the backend's *production*
+domain, which is built from `master`.
+
+The consequence is not obvious until it bites. Push a branch adding a backend route, open the
+frontend's branch preview, and the new page calls an endpoint that the production backend does
+not have. Vercel is behaving correctly at every step; the rewrite lands, the backend answers,
+and the answer is a 404. **A frontend preview always talks to production's backend, so a branch
+that changes both halves can only ever be tested with half of it deployed.**
+
+That is exactly how receipt scanning appeared to fail on a phone while working on a desktop.
+The desktop was running the dev server, whose Vite proxy points at a local backend with the new
+route. The phone was on the branch preview, whose rewrite points at production, which had no
+`/api/receipts/read`. Two rounds of investigation went into image quality and EXIF orientation
+before the error message was made specific enough to show that OCR had never been the problem.
+
+**To test a branch that changes both halves**, one of:
+
+- **Merge the backend change first.** Simplest, and fine when the backend change is additive —
+  a new endpoint nothing calls yet breaks nothing that already works.
+- **Point the rewrite at the backend's branch preview**, temporarily. The backend project gets a
+  `project-git-<branch>-scope.vercel.app` address per branch; put that in `frontend/vercel.json`
+  on the branch, test, and **revert it before merging**. Nothing enforces the revert, which is
+  the cost of this option.
+- **Run the frontend locally against the deployed backend** by pointing the Vite proxy at it in
+  `vite.config.ts`. Good for a desktop, no help for a phone.
+
+There is no way to make the rewrite follow the branch automatically. A runtime base URL — an
+environment variable the browser reads — would work, but it makes the request cross-origin and
+this project has no CORS configuration precisely because the rewrite made it unnecessary.
+
 Also check **Deployment Protection** on the backend project. If it covers production, the
 rewrite arrives without a Vercel login cookie and gets a redirect to a sign-in page instead of
 JSON, which reaches the browser as "could not reach the server" — a confusing symptom for a

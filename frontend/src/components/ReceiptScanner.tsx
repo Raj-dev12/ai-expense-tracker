@@ -50,10 +50,38 @@ const FAILURES: Record<ReceiptFailure, string> = {
     "The text reader could not be loaded, so nothing was read from the photo. This is not a problem with the image. Reload the page, or type the expense instead.",
   "no-text":
     "The text reader ran, but found no text on that photo. Try again with more light, less angle and the whole receipt in frame.",
+  // Careful with this one. It used to say the server "could not be reached",
+  // which was false in the case that actually happened: the server was reached,
+  // answered promptly, and said the route did not exist. A message that names a
+  // cause has to be right about the cause, or it sends people to look in the
+  // wrong place — which it did, for three rounds.
   "check-failed":
-    "The text was read, but the server could not be reached to check it. Try again in a moment, or type the expense instead.",
+    "The text was read, but checking it with the server did not succeed. Try again in a moment, or type the expense instead.",
   failed: "That receipt could not be read. Try another photo, or type the expense instead.",
 };
+
+export type FailureText = { message: string; detail: string | null };
+
+/**
+ * Turn whatever was thrown into the two things worth showing.
+ *
+ * Exported, and a plain function of its argument, so it can be checked. That is
+ * not incidental: this is the code that decided a phone should be told "the
+ * server could not be reached" when the server had replied
+ * `No route for POST /api/receipts/read`, and it was unreachable from a check
+ * because it lived inside an async handler nothing could drive. A decision worth
+ * getting right is worth being able to test.
+ */
+export function describeFailure(caught: unknown): FailureText {
+  const message = caught instanceof ReceiptError ? FAILURES[caught.kind] : FAILURES.failed;
+
+  // Only when it adds something. `includes` rather than `!==`: the thrown
+  // message is often the canned one with the advice trimmed off the end, and
+  // showing a sentence directly under a longer version of itself is noise. A
+  // check caught exactly that on the no-text failure.
+  const said = caught instanceof Error ? caught.message.trim() : "";
+  return { message, detail: said && !message.includes(said) ? said : null };
+}
 
 function progressLine(progress: ExtractProgress): string {
   const percent = progress.progress === null ? "" : ` ${Math.round(progress.progress * 100)}%`;
@@ -80,7 +108,21 @@ export function ReceiptScanner({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ExtractProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * What went wrong, in two registers.
+   *
+   * `message` is the canned sentence for the kind of failure: what it means and
+   * what to do about it. `detail` is whatever the thing that failed actually
+   * said, and it is shown *underneath* rather than instead.
+   *
+   * The second half was missing, and it cost three rounds of guessing. A scan
+   * failing on a phone reported "the server could not be reached", when the
+   * server had in fact replied `No route for POST /api/receipts/read` — a
+   * sentence that names the problem outright. It was thrown away in favour of a
+   * category. Categories are for deciding what to do; the detail is for working
+   * out what happened, and a person debugging needs both.
+   */
+  const [error, setError] = useState<FailureText | null>(null);
   /**
    * What the reader saw when it failed, kept so it can be shown.
    *
@@ -107,9 +149,7 @@ export function ReceiptScanner({
     try {
       onRead(await extractor.extract(file, setProgress));
     } catch (caught) {
-      setError(
-        caught instanceof ReceiptError ? FAILURES[caught.kind] : FAILURES.failed,
-      );
+      setError(describeFailure(caught));
       // The diagnosis, on screen rather than in a console, because the failure
       // worth diagnosing happened on a phone where there is no console to open.
       if (caught instanceof ReceiptError && caught.diagnostics) setFailed(caught.diagnostics);
@@ -161,7 +201,17 @@ export function ReceiptScanner({
         </div>
       )}
 
-      {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {error && (
+        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          <p>{error.message}</p>
+          {error.detail && (
+            // Monospaced and quieter: it is the machine's words, not this page's,
+            // and it is worth being able to read it exactly and paste it
+            // somewhere.
+            <p className="mt-1 font-mono text-xs break-words text-red-600">{error.detail}</p>
+          )}
+        </div>
+      )}
 
       {failed && <ReceiptDebug diagnostics={failed} showImage />}
     </div>
