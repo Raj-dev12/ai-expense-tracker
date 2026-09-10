@@ -690,6 +690,43 @@ That is also why this feature exists at all. Receipt photos were deliberately ou
 rejected for needing "file uploads and image storage". Doing the reading in the browser means
 there is neither, so the objection stopped applying rather than being overruled.
 
+### What it can and cannot read
+
+**It works on a flat, well-lit receipt photographed straight on. It does not work on a typical
+crumpled thermal receipt, and no amount of further tuning will change that.**
+
+That is measured, not guessed. Two real receipts came back at 51% and 45% recognition
+confidence, with output that was mostly noise — a total line that survived as
+`YHTEENSI iG i tk a`, and lines like `Mi > FS st E S KS` where the print had been. The parser
+was never given anything to parse.
+
+The reason is what Tesseract is. It is an OCR engine trained on clean printed document text:
+flat pages, dark ink on white, straight baselines. A crumpled thermal receipt breaks several of
+those at once — creases bend the baselines and cast their own shadows, the print is grey on
+off-white to begin with, the fonts are thin, and thermal paper fades. Preprocessing in a browser
+can only fix *global* problems: overall exposure, overall contrast, orientation. A crease is a
+*local* distortion, and no global contrast stretch or deskew touches it.
+
+The preprocessing here does what it usefully can — EXIF orientation, scaling, greyscale and a
+contrast stretch. Adding local (Sauvola) binarisation would help a flat receipt shot in poor
+light, which is a real case worth having. It would not rescue a creased one.
+
+**What would fix it is a different reader, not a better photograph.** A vision model handles
+crumpled receipts because it is not matching glyph shapes at all. The seam for that already
+exists: `ReceiptExtractor` in `frontend/src/receipts/extractor.ts` is one method, and
+`TesseractReceiptExtractor` is one implementation of it. A `VisionReceiptExtractor` would slot in
+beside it without anything downstream changing — the confidence checks, the confirm step and the
+save path are all independent of where the text came from.
+
+It is not built, because it needs an API key and this project's rule is that everything runs
+without one. The shape that would keep both is Tesseract as the no-key default and vision as the
+path when a key is present.
+
+So: useful for a receipt you have flattened out and photographed carefully, and honest about
+failing otherwise. Everything below is still worth reading — the arithmetic that checks a total
+does not care which reader produced it, and becomes *more* useful with a better one, since it
+stops firing on noise and starts catching real misreadings.
+
 ### The problem worth designing around
 
 OCR does not fail politely. It reads `24,90` as `2490` — a perfectly plausible number that is a
@@ -966,6 +1003,10 @@ answers a different question.
 
 ## What is not built
 
+**Receipt scanning reads flat, well-lit receipts and fails on crumpled thermal ones.** Measured
+at 51% and 45% confidence on two real receipts, output mostly noise. The limit is Tesseract, not
+the preprocessing or the parser — see "What it can and cannot read" above.
+
 Written down plainly, because a README that quietly implies more than exists is worse than
 one that admits the gaps.
 
@@ -988,6 +1029,10 @@ would make this a bigger project rather than a clearer one.
 Receipt photos were on this list until the reasons for keeping them off stopped holding —
 see "Scanning a receipt" above. Storing the images still is not planned, and neither is a
 table of line items.
+
+**A vision-model reader** is the one addition that would make receipt scanning genuinely work,
+and it is deliberately not built: it needs an API key, and this project runs without one. The
+interface it would implement is already there.
 
 ## Repository layout
 

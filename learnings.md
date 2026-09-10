@@ -1292,6 +1292,8 @@ want when someone asks you about the project in six months.
 | Grey, not black and white | Contrast stretched, thresholding left to Tesseract | Tesseract binarises internally and does it better from grey than from something already reduced to two values. Preprocessing should make the letters separable, not make the decision. |
 | A blank total says which kind of blank it is | "No total found" against "read as 2490.00, and that looks wrong" | Both leave the box empty, which is right, and both were reported as indistinguishable, which was fair — the difference was buried in a sentence. They ask different things of the person: go and find the figure, or adjudicate between two of them. The kind now leads, and is repeated beside the box, because the box is where the eye is when it is empty. |
 | The shop name is trimmed at the ends only | Marks inside a name are kept | A logo, a border or a torn edge at the top of a receipt reports as text, and arrived as symbols wrapped round the name. But "K-MARKET" flattened to "KMARKET" would look correct and be wrong, which is worse than a stray character somebody can see and delete. |
+| Tesseract cannot read a crumpled thermal receipt, and that is the end of it | Measured: 51% and 45% confidence on two real receipts, output mostly noise | Not a tuning problem. Tesseract is trained on flat printed document text, and a creased thermal receipt breaks several of its assumptions at once — bent baselines, local shadows, grey-on-off-white, thin fading print. Browser preprocessing can only fix *global* problems: exposure, contrast, orientation. A crease is local, and nothing global touches it. Written into the README as a plain statement of what the feature does and does not do, rather than left for the next person to discover with their own receipts. |
+| The fix would be a different reader, not a better photograph | `VisionReceiptExtractor`, not built | A vision model is not matching glyph shapes, so creases do not defeat it. The seam is already there — `ReceiptExtractor` is one method and Tesseract is one implementation — which is what the adapter was for. It stays unbuilt because it needs an API key and the project runs without one; the shape that keeps both is Tesseract as the no-key default and vision when a key is present. |
 | A failure shows what failed, not only what kind of failure it was | The canned sentence, and the server’s own words under it | The scanner kept the category and discarded the message. A phone was told "the server could not be reached" while the server was replying `No route for POST /api/receipts/read` — a sentence that names the problem outright. Three rounds went into EXIF orientation, resolution and JPEG quality, none of which were involved. A category is for deciding what to do; the detail is for working out what happened, and debugging needs both. |
 | A frontend preview cannot exercise backend changes | `vercel.json` rewrites take a fixed string and do not interpolate environment variables | Every frontend deployment, preview included, rewrites `/api` to the backend’s *production* domain. A branch changing both halves can only be tested with half of it deployed. Not a bug in anything — Vercel behaves correctly at every step — which is what makes it expensive: the rewrite lands, the backend answers, and the answer is a 404. |
 | Every core variant is vendored, not the one that was observed | All six, ~31 MB | Tesseract chooses at runtime between relaxed SIMD, SIMD and plain builds on what the browser supports, so the file it asks for is not knowable from one machine. Five were shipped, the browser asked for the sixth, and OCR never started. The required list is now read out of tesseract.js's own source by a check, so it cannot drift from what the library actually requests. |
@@ -3388,6 +3390,25 @@ Worth naming as a pattern: **the absence of a step is invisible in a way a wrong
 Nothing in the code said "no preprocessing"; there was simply nothing there, and nothing there
 looks the same as nothing needed. A wrong choice can be read and argued with. A missing one has
 to be asked about, which is what happened.
+
+**The honest answer was the right one, and it still took two false starts to reach**
+
+Asked outright whether Tesseract could read a crumpled thermal receipt, the answer given was no,
+with reasons: it is trained on flat printed document text, creases are a *local* distortion, and
+browser preprocessing can only correct global ones. Two real receipts then came back at 51% and
+45% confidence with mostly noise, which is what that prediction looks like when it is right.
+
+Worth recording is how much came before that answer. A round on EXIF orientation and image
+scaling. A round on JPEG quality and resolution. Both were plausible, both were real gaps in the
+preprocessing, and neither was the reason anything failed. The question that resolved it —
+"can this engine do this task at all" — could have been asked first and was not, because there
+was always a specific-looking fault to chase instead.
+
+The pattern: **a series of plausible local explanations can run for a long time without anyone
+asking whether the approach is capable of the job.** Each round produced a real improvement and
+none of them moved the outcome, which is exactly what that failure mode looks like from inside.
+The tell was available early — 51% confidence is not a receipt that needs better preprocessing,
+it is a receipt the engine cannot see — and it was reported in the very first debug panel.
 
 **Three rounds spent on the wrong half of the system**
 

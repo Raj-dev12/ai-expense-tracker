@@ -592,6 +592,23 @@ unreachable.
       rather than its argument
 - [x] Verified: 307 backend tests, 354 render checks
 
+## Reassessed, and written down honestly
+
+- [x] Two real receipts: 51% and 45% recognition confidence, output mostly noise. A total line
+      surviving as `YHTEENSI iG i tk a` is not something a parser can be improved into reading
+- [x] The prediction was right: Tesseract cannot read a crumpled thermal receipt. Not a tuning
+      problem — creases are a local distortion and browser preprocessing corrects global ones
+- [x] README now says plainly, near the top of the receipt section and again under "What is not
+      built", what the feature does and does not do, with the measured numbers and the reason
+- [x] The vision extractor named as the path that would fix it, along with why it is not built:
+      it needs an API key and the project runs without one. The interface it would implement is
+      already there
+- [x] Recorded that two rounds went into preprocessing before the question "can this engine do
+      this job at all" was asked. Each round was a real improvement; none of them moved the
+      outcome, which is what that failure mode looks like from inside
+- [x] Merged to master, so the calendar, the two-column layout, the collapsible panels, the date
+      and merchant parsing fixes and receipt scanning all go live together
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.
