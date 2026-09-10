@@ -20,19 +20,57 @@ import type { WordBox } from "../receipts/extractor";
  * assert that the total really was marked without a browser being involved.
  */
 
-/** The union of the words that make up one value, as a fraction of the image. */
-function boxFor(source: string | null, words: WordBox[]): WordBox | null {
+/**
+ * How much of the picture one value's box is allowed to cover.
+ *
+ * A total, a date or a shop name occupies a line, not a page. A box larger than
+ * this is not a box round a value — it is the union of several things that
+ * should not have matched, and drawing it points at everything and therefore at
+ * nothing.
+ */
+const MAX_BOX_SHARE = 0.5;
+
+/**
+ * The union of the words that make up one value, as a fraction of the image.
+ *
+ * THE MATCHING HAS TO BE TIGHT
+ * ----------------------------
+ * It was not, and the boxes landed off the receipt entirely. The test was
+ * whether the word's text appeared *anywhere inside* the value, which sounds
+ * reasonable until the page is mostly OCR noise: looking for "K-MARKET" then
+ * matched a stray "AR" in one corner and an "ET" in another — both genuinely
+ * substrings of it — and the union of those three stretched across three
+ * quarters of the photo.
+ *
+ * Reproduced at 74% × 97% of the image before this was tightened. It is worth
+ * being precise about what it was *not*: the displayed image is the prepared
+ * canvas and the percentages are in that canvas's coordinates, so nothing was
+ * mis-scaled. A perfectly correct coordinate can still point at the wrong thing.
+ *
+ * Now a word has to *be* one of the value's words, or be a long enough piece of
+ * one to be unambiguous — "MARKET" for "K-MARKET" when OCR split the hyphen, but
+ * never a two-letter fragment.
+ */
+function boxFor(source: string | null, words: WordBox[], imageWidth: number, imageHeight: number): WordBox | null {
   if (!source) return null;
 
-  const wanted = source.replace(/\s+/g, "");
-  if (wanted.length < 2) return null;
+  const tokens = source
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+  if (tokens.length === 0) return null;
 
-  // Words whose text is part of what was read. Short fragments are skipped: a
-  // stray "21" appearing elsewhere on the receipt would stretch the box across
-  // half the photo.
   const parts = words.filter((word) => {
-    const text = word.text.replace(/\s+/g, "");
-    return text.length >= 2 && wanted.includes(text);
+    const text = word.text.trim();
+    if (text.length < 2) return false;
+    return tokens.some(
+      (token) =>
+        token === text ||
+        // A piece of a token, but only one long enough that it could not be a
+        // coincidence. Four characters is where receipt noise stops producing
+        // accidental matches.
+        (text.length >= 4 && token.includes(text)),
+    );
   });
 
   if (parts.length === 0) return null;
@@ -42,7 +80,16 @@ function boxFor(source: string | null, words: WordBox[]): WordBox | null {
   const right = Math.max(...parts.map((part) => part.left + part.width));
   const bottom = Math.max(...parts.map((part) => part.top + part.height));
 
-  return { text: source, left, top, width: right - left, height: bottom - top };
+  const width = right - left;
+  const height = bottom - top;
+
+  // Last guard. Even with tight matching, a receipt whose OCR is mostly rubbish
+  // can throw up two words that legitimately match and sit at opposite corners.
+  // Drawing nothing is better than drawing a box round the whole photo, which
+  // claims to point at something and does not.
+  if (width > imageWidth * MAX_BOX_SHARE && height > imageHeight * MAX_BOX_SHARE) return null;
+
+  return { text: source, left, top, width, height };
 }
 
 type Marked = { label: string; source: string | null; tone: "read" | "doubted" };
@@ -62,7 +109,7 @@ export function ReceiptImage({
   marked: Marked[];
 }) {
   const boxes = marked
-    .map((mark) => ({ ...mark, box: boxFor(mark.source, words) }))
+    .map((mark) => ({ ...mark, box: boxFor(mark.source, words, imageWidth, imageHeight) }))
     .filter((mark): mark is Marked & { box: WordBox } => mark.box !== null);
 
   // A little breathing room round the words, so the box frames the number

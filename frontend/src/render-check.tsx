@@ -38,6 +38,7 @@ import { endOfMonth, isInMonth, monthGrid, monthWindow, shiftMonth } from "./cal
 import { addDays } from "./periods";
 import { readCollapsed, type PanelId } from "./panels";
 import { ReceiptDebug } from "./components/ReceiptDebug";
+import { ReceiptImage } from "./components/ReceiptImage";
 import { ReceiptReview } from "./components/ReceiptReview";
 import { ReceiptScanner } from "./components/ReceiptScanner";
 import type { ReceiptData, TotalVerdict } from "./api";
@@ -1882,3 +1883,64 @@ check("debug: the text is logged, not just the counts", pipelineHasLog.includes(
 // The prepared image outlives a failure, or the failure screen would show nothing.
 check("debug: a failure keeps its image alive", pipelineHasLog.includes("if (!caught.diagnostics) URL.revokeObjectURL"));
 check("debug: and the screen that shows it releases it", scannerHasDebug.includes("URL.revokeObjectURL(failed.imageUrl)"));
+
+// 35. A box has to point at one thing, not at everything.
+//
+// The reported symptom was boxes landing off the receipt. It was not a
+// coordinate problem — the displayed image is the prepared canvas and the
+// percentages are in its coordinates — it was the matching. "Does this word
+// appear anywhere inside the value" is satisfied by any two-letter fragment, and
+// a page of OCR noise is full of them: looking for "K-MARKET" matched a stray
+// "AR" in one corner and an "ET" in another, and the union of those covered
+// three quarters of the photo.
+const NOISY_WORDS = [
+  { text: "K-MARKET", left: 100, top: 40, width: 300, height: 40 },
+  { text: "AR", left: 900, top: 800, width: 30, height: 20 },
+  { text: "ET", left: 60, top: 1560, width: 30, height: 20 },
+  { text: "SS", left: 20, top: 900, width: 30, height: 20 },
+];
+
+const noisyBoxes = renderToStaticMarkup(
+  <ReceiptImage
+    imageUrl="blob:x"
+    imageWidth={1200}
+    imageHeight={1600}
+    words={NOISY_WORDS}
+    marked={[{ label: "Shop", source: "K-MARKET", tone: "read" }]}
+  />,
+);
+
+const shopBox = noisyBoxes.match(/data-marked="Shop"[^>]*style="([^"]*)"/)?.[1] ?? "";
+const shopSize = [...shopBox.matchAll(/(?:width|height):(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));
+check("box: a name still gets a box among noise", shopBox !== "", shopBox);
+check(
+  "box: and it frames the name rather than the page",
+  shopSize.every((share) => share < 40),
+  shopSize.map((n) => `${n.toFixed(1)}%`).join(" x "),
+);
+
+// Two-letter fragments must not match at all. Reproduced before the fix at
+// 74% x 97% of the image.
+const fragmentsOnly = renderToStaticMarkup(
+  <ReceiptImage
+    imageUrl="blob:x"
+    imageWidth={1200}
+    imageHeight={1600}
+    words={NOISY_WORDS.slice(1)}
+    marked={[{ label: "Shop", source: "K-MARKET", tone: "read" }]}
+  />,
+);
+check("box: fragments alone match nothing", !fragmentsOnly.includes('data-marked="Shop"'));
+check("box: and the gap is admitted rather than hidden", fragmentsOnly.includes("Not everything could be pointed at"));
+
+// OCR splitting a hyphen is a real thing and must still match.
+const splitName = renderToStaticMarkup(
+  <ReceiptImage
+    imageUrl="blob:x"
+    imageWidth={1200}
+    imageHeight={1600}
+    words={[{ text: "MARKET", left: 140, top: 40, width: 200, height: 40 }]}
+    marked={[{ label: "Shop", source: "K-MARKET", tone: "read" }]}
+  />,
+);
+check("box: a long piece of a name still matches", splitName.includes('data-marked="Shop"'));
