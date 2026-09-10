@@ -906,6 +906,26 @@ invented. Left alone — tightening it is what keeps 24,90-read-as-21,90 caught,
 false contradiction for a silent wrong answer is the wrong direction.
 
 321 backend tests, 367 render checks, both typecheck clean.
+
+### The README, corrected against the new numbers
+
+Third statement of the same claim, and all three movements are on the page rather than tidied
+into one. "Works on flat, well-lit receipts" came from two photos and no scoring. Measuring put
+it at zero, which was worse than the claim and was published anyway. Fixing what that revealed
+put it at eleven of twenty.
+
+- [x] Headline rewritten: reads about half the receipts, eleven totals right in twenty runs, ten
+      shown, zero silent wrong answers — with the measurement's method named, since "twenty runs"
+      is ten photographs under two segmentation modes and saying so matters
+- [x] The "What is not built" summary corrected to match, rather than left contradicting the
+      section above it
+- [x] Names what was actually wrong — the checks, not the exposure or the angle or the layout —
+      and what is still wrong, which is the item prices and is a limit of the reader
+- [x] The Sauvola and perspective paragraph now records that they were about to be built and were
+      stopped by the measurement. That is the bench's most valuable result to date: work aimed at
+      the wrong thing, stopped before it was spent
+- [x] Checked for stale copies of the old claim elsewhere in the file. One reference remains and
+      is deliberate — the sentence describing the correction itself
 ### Next
 
 - [x] Labelled photos from the four buckets, and a baseline run recorded

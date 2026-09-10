@@ -692,32 +692,45 @@ there is neither, so the objection stopped applying rather than being overruled.
 
 ### What it can and cannot read
 
-**It does not reliably read a receipt. Measured across ten real receipts in four conditions, it
-extracted zero correct totals — including all three that were flat, well lit and photographed
-straight on.**
+**It reads about half the receipts put in front of it, and it has never yet shown a wrong total
+as though it were right.** Measured over twenty runs — ten real receipts in four conditions, each
+read under two page segmentation modes — it got the total right eleven times, put ten of those in
+front of the user, and produced **zero silent wrong answers**.
 
-This section previously claimed it worked on exactly those flat, well-lit receipts. That claim
-came from two photos and no scoring. Measuring it properly, against totals typed off the paper by
-hand, showed it was wrong. It is corrected here rather than quietly deleted, for the same reason
-the receipt-scanning reversal further up got a row in the decisions table instead of an edit.
+Those numbers have moved twice and both movements are recorded rather than tidied away. This
+section first claimed the feature worked on flat, well-lit receipts, on the strength of two
+photos and no scoring. A proper measurement — against totals typed off the paper by hand — put it
+at *zero*, which was worse than the claim. Then the measurement was believed, the cause was found,
+and it went to eleven in twenty. The first number was wishful, the second was real and the third
+is real; the way to tell is that the second one was published.
 
-**What did work is the part that was designed to.** Not one of those ten failures was presented
-as a success. Zero silent wrong answers: every total that came out wrong was either contradicted
-by the arithmetic checks or absent altogether, so nothing plausible-but-wrong reached the confirm
-step. None of the ten receipts prints a date; nine correctly came back with no date, and the
-tenth invented one out of a run of digits shaped like `05-06-24` — a narrow, now-documented hole
-in `findDate`.
+**What has held throughout is the part that was designed to.** Not one wrong total has reached
+the confirm step looking correct. Every failure was contradicted by the arithmetic checks or
+absent altogether, and an absent total is a blank box somebody fills in — recoverable, in a way a
+confident wrong number is not. None of the ten receipts prints a date; nine correctly came back
+with no date, and the tenth invented one out of a run of digits shaped like `05-06-24`, a narrow
+and now-documented hole in `findDate`.
 
-That distinction is the entire point of the design. The feature does not currently do its job,
-and it does not lie about it. An honest failure is recoverable by typing the expense; a confident
-wrong number is not.
+**What was actually wrong was none of the things it looked like.** Not the exposure, not the
+angle, not the page layout. Totals were being read correctly and then thrown away, because the
+checks were combined as "any disagreement wins" — and the item sum, which is right only if every
+one of many small prices reads correctly, was overruling a card line that agreed with the total
+exactly. Two parsing bugs sat underneath that: `KORTTIMAKSU` matched no keyword at all, so the
+card line was both unrecognised as a payment line and counted as a purchase; and that line
+accepted a bare integer, so a damaged `Korttimaksu < 3` handed back 3,00 and destroyed a total of
+13,62 read perfectly.
 
-**Why it fails is not yet established, and the two candidates need opposite fixes.** Either the
-totals never survived recognition — a pixel problem, which better preprocessing can address — or
-they survived and the parser failed to find them, which no amount of image processing touches.
-The comparison bench at `frontend/compare.html` records, for every receipt, whether the total's
-digits appeared in the recognised text and what the parser actually matched. Those two answers
-are what separate the cases, and no preprocessing work is justified until they have been read.
+**What is still wrong is the item prices**, and it is not a preprocessing problem. The totals
+survive because a total is one large isolated line. Item prices are small, dense and numerous,
+and a single misread digit is enough to make the sum disagree — on `flat-01`, `1,35` reads as
+`1,95` and `1,75` as `1.52` on the same photograph. Local binarisation and perspective correction
+were the obvious next step until the measurement said otherwise; neither meaningfully improves
+small dense text, and both are parked. The honest fix for item-level reading is a different
+reader, which is the same conclusion the crumpled-receipt case reaches below.
+
+The bench that produced all of this is at `frontend/compare.html`, development only. It scores
+readings against hand-typed totals and never against the engine's own confidence, because
+sharpening an image raises confidence whether or not the letters were right.
 
 Separately, and not the open question: **a crumpled thermal receipt is beyond this engine, and no
 amount of tuning will change that.** Two such receipts came back at 51% and 45% recognition
@@ -734,10 +747,10 @@ can only fix *global* problems: overall exposure, overall contrast, orientation.
 
 The preprocessing here does what it usefully can — EXIF orientation, scaling, greyscale and a
 contrast stretch. Local (Sauvola) binarisation and perspective correction are the two techniques
-still missing, and they are the obvious next step *if* the flat receipts turn out to be failing
-at the pixels. If they are failing at the parser instead, both would be aimed at the wrong thing,
-which is why the bench came before either of them. Neither would rescue a creased receipt in any
-case.
+still missing, and they were about to be built when the bench was written to judge whether they
+helped. It said they would not: the flat receipts were failing at the checks, not at the pixels.
+Both are parked, unbuilt, and that is the bench's most valuable result so far — a week of work
+aimed at the wrong thing, stopped before it was spent.
 
 **What would fix it is a different reader, not a better photograph.** A vision model handles
 crumpled receipts because it is not matching glyph shapes at all. The seam for that already
@@ -750,11 +763,10 @@ It is not built, because it needs an API key and this project's rule is that eve
 without one. The shape that would keep both is Tesseract as the no-key default and vision as the
 path when a key is present.
 
-So: not currently usable for reading a receipt, on any of the ten photographs it was measured
-against, and visibly rather than quietly so. Everything below is still worth reading — the
-arithmetic that checks a total
-does not care which reader produced it, and becomes *more* useful with a better one, since it
-stops firing on noise and starts catching real misreadings.
+So: worth trying on a receipt you have flattened out, right about half the time, and honest the
+other half. Everything below is still worth reading — the arithmetic that checks a total does not
+care which reader produced it, and becomes *more* useful with a better one, since it stops firing
+on noise and starts catching real misreadings.
 
 ### The problem worth designing around
 
@@ -1032,11 +1044,11 @@ answers a different question.
 
 ## What is not built
 
-**Receipt scanning does not reliably read a receipt.** Measured across ten real receipts in four
-conditions: zero correct totals, including all three that were flat, well lit and shot straight
-on. It fails visibly rather than silently — zero wrong totals were presented as trustworthy — but
-it fails. Whether the cause is the pixels or the parser is being measured; see "What it can and
-cannot read" above.
+**Receipt scanning reads about half the receipts put in front of it.** Measured over twenty runs
+of ten real receipts in four conditions: the total was right eleven times, shown ten times, with
+zero wrong totals presented as trustworthy. What still fails is the line items — small dense text
+where one misread digit breaks the sum — and that is a limit of the reader, not of the
+preprocessing. See "What it can and cannot read" above.
 
 Written down plainly, because a README that quietly implies more than exists is worse than
 one that admits the gaps.
