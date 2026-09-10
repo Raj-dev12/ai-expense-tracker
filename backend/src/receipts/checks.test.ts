@@ -197,11 +197,53 @@ describe("a total the card line disagrees with", () => {
       lines(`
         K-MARKET
         YHTEENSÄ               24,90
-        PANKKIKORTTI           2490
+        PANKKIKORTTI           29,40
       `),
       TODAY,
     ).verdict;
     assert.equal(verdict.kind, "contradicted");
+  });
+
+  it("ignores a card line whose own reading lost its cents", () => {
+    // This used to be the case above, with the card line reading 2490, and it
+    // asserted `contradicted` — which threw away a total of 24,90 that had been
+    // read perfectly, because the *card* line was the damaged one.
+    //
+    // A card charge is always printed with cents, so a bare integer there is not
+    // a reading of the amount: it is debris. Measured on real receipts, every
+    // misparse of this line was one — 3, 4, 7, 1988 — while the printed value had
+    // cents and was sitting on the same line. Ignoring it costs a corroboration
+    // that was never real. Trusting it destroys a total that was.
+    const receipt = normalizeReceipt(
+      lines(`
+        K-MARKET
+        YHTEENSÄ               24,90
+        PANKKIKORTTI           2490
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "unverified");
+    assert.equal(receipt.total, 24.9);
+  });
+
+  it("takes the amount with cents, not the last number on the line", () => {
+    // "Korttimaksu < 3" is a real line off a real receipt: the printed 13,62 was
+    // destroyed and a stray 3 survived. The same shape arrives as trailing debris
+    // — a VAT class letter read as a digit after the amount — and `lastAmount`
+    // takes the last token, so the debris would win precisely because it comes
+    // last.
+    const receipt = normalizeReceipt(
+      lines(`
+        LIDL
+        Salaatti                1,99
+        Avokado                 2,49
+        YHTEENSÄ                4,48
+        Korttimaksu             4,48 8
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "corroborated");
+    assert.equal(receipt.total, 4.48);
   });
 });
 
@@ -292,5 +334,119 @@ describe("what reaches the confirm step", () => {
       TODAY,
     );
     assert.equal(receipt.total, 1.29);
+  });
+});
+
+/**
+ * Not every check is worth the same, and treating them as if they were threw
+ * away correct answers.
+ *
+ * Measured on ten real receipts: five totals read exactly right, and every one of
+ * them contradicted, because the item sums were short by a euro or two. Item
+ * prices are small dense text and the total is one large isolated line — the sum
+ * is right only if all of many things read, the total only if one thing did. So
+ * the sum disagreeing is the *likeliest* outcome on a receipt whose total is
+ * perfect, and it was being allowed to overrule a card line that agreed exactly.
+ */
+describe("checks that are not equally reliable", () => {
+  it("believes the card line over a short item sum", () => {
+    // The measured case, from a real Lidl receipt: YHTEENSÄ and Korttimaksu both
+    // read 13,62 and agree with each other, while one item price was mangled so
+    // the lines add up short. Two independent readings of the same number is the
+    // strongest evidence on the page; the sum being short says a price was
+    // misread, which is a fact about the items, not about the total.
+    const receipt = normalizeReceipt(
+      lines(`
+        LIDL
+        Salaatti                1,99
+        Ruispala                1,35
+        Kastike                 3,79
+        Savutofu                1,75
+        Avokado                 2,49
+        YHTEENSÄ               13,62
+        KORTTIMAKSU            13,62
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "corroborated");
+    assert.equal(receipt.total, 13.62);
+  });
+
+  it("still contradicts when the card line is the thing that disagrees", () => {
+    // The other half of the same rule. One line disagreeing with another line is
+    // a real conflict, because both read about as well as each other.
+    const receipt = normalizeReceipt(
+      lines(`
+        LIDL
+        Salaatti                1,99
+        YHTEENSÄ               18,62
+        KORTTIMAKSU            13,62
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "contradicted");
+    assert.equal(receipt.total, null);
+  });
+
+  it("reports a shortfall the receipt itself explains, rather than blanking the total", () => {
+    // "Pesuaine 1466" is 14,66 with the comma eaten — an amount the receipt
+    // printed and `findItems` refused, because a price without cents is not a
+    // price. The lines are therefore short *by construction*, and a sum missing a
+    // known amount cannot argue about the total.
+    const receipt = normalizeReceipt(
+      lines(`
+        K-MARKET
+        Maito                   1,29
+        Ruisleipä               2,50
+        Juusto                  6,45
+        Pesuaine                1466
+        YHTEENSÄ               24,90
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "unverified");
+    assert.equal(receipt.total, 24.9);
+    assert.match(
+      receipt.verdict.kind === "unverified" ? receipt.verdict.why : "",
+      /could not be read as a line/,
+    );
+  });
+
+  it("does not extend that to a shortfall nothing explains", () => {
+    // Every amount on this receipt was read and they still do not reach the
+    // total, so there is money in it that nothing on the page supports. That is
+    // the original reasoning and it survives — the change above applies only when
+    // there is positive evidence of a line going missing.
+    const receipt = normalizeReceipt(
+      lines(`
+        K-MARKET
+        Maito                   1,29
+        YHTEENSÄ               99,00
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "contradicted");
+    assert.equal(receipt.total, null);
+  });
+
+  it("contradicts when the lines exceed the total, missing prices or not", () => {
+    // OCR drops amounts; it does not invent them. So every price here was on the
+    // paper, the receipt's real item total is at least this much, and a total
+    // below it is too small whatever else was missed. This is the direction that
+    // catches 24,90 read as 21,90.
+    const receipt = normalizeReceipt(
+      lines(`
+        K-MARKET
+        Maito                   1,29
+        Ruisleipä               2,50
+        Juusto                  6,45
+        Pesuaine               14,66
+        Sillit                   345
+        YHTEENSÄ               21,90
+      `),
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "contradicted");
+    assert.equal(receipt.total, null);
   });
 });

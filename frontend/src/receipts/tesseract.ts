@@ -41,7 +41,7 @@ const ENGINE = () => import("tesseract.js");
  * being reachable — offline, or behind a restrictive network, scanning would
  * simply stop working with no way to tell why from inside the app.
  */
-const ASSETS = "/tesseract";
+export const ASSETS = "/tesseract";
 
 /**
  * English and Finnish.
@@ -51,7 +51,7 @@ const ASSETS = "/tesseract";
  * keyword matching tolerates OCR damage either way, but tolerating less damage
  * is better than tolerating more.
  */
-const LANGUAGES = ["eng", "fin"];
+export const LANGUAGES = ["eng", "fin"];
 
 const ACCEPTED_TYPES = [
   "image/jpeg",

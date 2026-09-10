@@ -127,9 +127,19 @@ export function moneyTokens(line: string): MoneyToken[] {
   return found;
 }
 
-/** The amount at the end of a line, which is where a receipt puts it. */
-function lastAmount(line: string): MoneyToken | null {
-  const tokens = moneyTokens(line).filter((token) => !token.negative);
+/**
+ * The amount at the end of a line, which is where a receipt puts it.
+ *
+ * `withCentsOnly` is for lines where a bare integer cannot be the value. A price
+ * is printed "5,00", never "5", so on those lines an integer is debris — the VAT
+ * class letter misread as a digit, half of an amount whose comma was eaten, a
+ * fragment of the line below. Taking the last token without that filter means the
+ * debris wins, because the debris comes last.
+ */
+function lastAmount(line: string, withCentsOnly = false): MoneyToken | null {
+  const tokens = moneyTokens(line)
+    .filter((token) => !token.negative)
+    .filter((token) => !withCentsOnly || token.hasCents);
   return tokens.length > 0 ? (tokens[tokens.length - 1] ?? null) : null;
 }
 
@@ -162,12 +172,12 @@ function isJustAnAmount(line: string): boolean {
  * price of the milk as the total, which is the shape of mistake this whole
  * module is arranged to avoid: plausible, and completely wrong.
  */
-function amountForLabel(lines: string[], index: number): MoneyToken | null {
-  const own = lastAmount(lines[index] ?? "");
+function amountForLabel(lines: string[], index: number, withCentsOnly = false): MoneyToken | null {
+  const own = lastAmount(lines[index] ?? "", withCentsOnly);
   if (own) return own;
 
   const next = lines[index + 1];
-  return next && isJustAnAmount(next) ? lastAmount(next) : null;
+  return next && isJustAnAmount(next) ? lastAmount(next, withCentsOnly) : null;
 }
 
 /**
@@ -175,6 +185,27 @@ function amountForLabel(lines: string[], index: number): MoneyToken | null {
  *
  * Only lines that actually say so are considered. A receipt whose total line was
  * lost to a bad photo gets no total rather than the biggest number on the page.
+ *
+ * THE TWO LINES ARE READ DIFFERENTLY, AND HAVE TO BE
+ * --------------------------------------------------
+ * The total accepts a bare integer, because a total that lost its decimal comma
+ * is exactly that shape and catching one is the point of the checks. The card
+ * line must not, and the difference cost real money: a damaged
+ * `Korttimaksu < 3` handed back 3,00 as the amount paid, which then disagreed
+ * with a total of 13,62 that had been read perfectly. Every misparse of this seen
+ * on real receipts — 3, 4, 7, 1988 — was a bare integer where the printed value
+ * had cents.
+ *
+ * A card charge is always printed with cents. So on that line an integer is not a
+ * reading of the amount, it is debris: the VAT class letter misread as a digit,
+ * half an amount whose comma was eaten, a fragment of the line below. Ignoring it
+ * costs a corroboration that was never real; trusting it destroys a total that
+ * was.
+ *
+ * This is the same rule `findItems` already applies to prices, for the same
+ * reason, and it is applied here for the more pressing one: since a card line
+ * that agrees now outranks a disagreeing item sum, a card line that *dis*agrees
+ * carries proportionate weight, and it has to have earned it.
  */
 export function findTotal(lines: string[]): { total: MoneyToken | null; alsoPaid: MoneyToken | null } {
   let total: MoneyToken | null = null;
@@ -186,7 +217,7 @@ export function findTotal(lines: string[]): { total: MoneyToken | null; alsoPaid
       continue;
     }
     if (!alsoPaid && lineHasKeyword(line, PAID_WORDS)) {
-      alsoPaid = amountForLabel(lines, index);
+      alsoPaid = amountForLabel(lines, index, true);
     }
   }
 
@@ -215,10 +246,26 @@ export function findItems(lines: string[]): {
   items: ReceiptItem[];
   tokens: MoneyToken[];
   hadDiscountLine: boolean;
+  /**
+   * Amounts seen on a line and then not counted as items.
+   *
+   * The two tests below — a price must have cents, a description must have
+   * letters — are exactly what OCR damage on small dense text trips. So this is a
+   * count of the times this function knew it was throwing away something that
+   * might have been a purchase, and it is the difference between "these are the
+   * items" and "these are the items I could read".
+   *
+   * It exists because the sum was being used to contradict totals that were
+   * right. A sum built from an incomplete list cannot speak to whether a total is
+   * correct — it can only agree by luck or disagree by construction — and until
+   * this was reported there was no way for the checks to know which they had.
+   */
+  unaccounted: number;
 } {
   const items: ReceiptItem[] = [];
   const tokens: MoneyToken[] = [];
   let hadDiscountLine = false;
+  let unaccounted = 0;
 
   for (const [index, line] of lines.entries()) {
     if (lineHasKeyword(line, DISCOUNT_WORDS)) hadDiscountLine = true;
@@ -247,10 +294,18 @@ export function findItems(lines: string[]): {
     // "Itämerenkatu 21, Helsinki" was read as a twenty-one euro purchase, which
     // then contradicted a total that was perfectly correct.
     //
-    // A genuine whole-euro item is missed by this, and that is the safe
-    // direction: the sum then disagrees with the total and a person is asked,
-    // rather than a wrong sum quietly confirming a wrong total.
-    if (!amount.hasCents) continue;
+    // A genuine whole-euro item is missed by this, and so is any price whose
+    // comma OCR ate. That was called "the safe direction" on the grounds that the
+    // sum would then disagree and a person would be asked — which held only while
+    // being asked was cheap. Measured on ten real receipts it was not: the sum
+    // disagreed with five totals that were read perfectly, and a contradicted
+    // total is blanked rather than shown. So the skip is still right and it is
+    // now *counted*, and the checks are told the list they are adding up is not
+    // the whole receipt.
+    if (!amount.hasCents) {
+      unaccounted += 1;
+      continue;
+    }
 
     // What is left once the amount is taken away. A line of nothing but digits
     // is a reference number; a line with words is something bought.
@@ -260,13 +315,19 @@ export function findItems(lines: string[]): {
       .replace(/\s+/g, " ")
       .trim();
 
-    if (description.replace(/[^\p{L}]/gu, "").length < 2) continue;
+    // An amount with no words beside it is a reference number — or a description
+    // OCR reduced to punctuation, which on a thermal receipt is common. Counted
+    // for the same reason as above: the sum is missing something either way.
+    if (description.replace(/[^\p{L}]/gu, "").length < 2) {
+      unaccounted += 1;
+      continue;
+    }
 
     items.push({ description, amount: amount.value });
     tokens.push(amount);
   }
 
-  return { items, tokens, hadDiscountLine };
+  return { items, tokens, hadDiscountLine, unaccounted };
 }
 
 const NUMERIC_DATE = /\b(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})\b/;
@@ -433,10 +494,17 @@ export function normalizeReceipt(rawLines: string[], today: string): ReceiptData
   const date = findDate(lines, today);
   const { total, alsoPaid } = findTotal(lines);
   const vat = findVat(lines);
-  const { items, tokens: itemTokens, hadDiscountLine } = findItems(lines);
+  const { items, tokens: itemTokens, hadDiscountLine, unaccounted } = findItems(lines);
   const currency = findCurrency(lines);
 
-  const verdict = verdictFor({ total, alsoPaid, vat, itemTokens, hadDiscountLine });
+  const verdict = verdictFor({
+    total,
+    alsoPaid,
+    vat,
+    itemTokens,
+    hadDiscountLine,
+    unaccountedItems: unaccounted,
+  });
 
   // A tally of how much was read, not of how much is right. Those are different
   // questions and the verdict answers the second one.

@@ -216,3 +216,35 @@ export async function prepareForOcr(file: File): Promise<PreparedImage> {
 
   return { canvas, width, height, url };
 }
+
+/**
+ * One way of preparing a photo, named so a result can be attributed to it.
+ *
+ * The list exists because of the question "did that step help?", which cannot be
+ * answered by a pipeline with one path through it. The comparison harness runs
+ * every entry over the same photo and puts the readings side by side; the app
+ * itself still calls `prepareForOcr` and is unaffected by anything added here.
+ */
+export type Preparation = {
+  /** Stable across runs, so a saved result can be matched to the step that made it. */
+  id: string;
+  /** Shown in the harness. Sentence case, like the rest of the interface. */
+  label: string;
+  prepare: (file: File) => Promise<PreparedImage>;
+};
+
+/**
+ * Every preparation worth comparing, baseline first.
+ *
+ * Only the baseline for now, on purpose: the point of measuring before changing
+ * anything is to have a number from *before*. Local binarisation and perspective
+ * correction become entries beside it, and the grid then says what each one did
+ * rather than what the two of them together did.
+ */
+export const PREPARATIONS: Preparation[] = [
+  {
+    id: "current",
+    label: "Grey and a global contrast stretch",
+    prepare: prepareForOcr,
+  },
+];

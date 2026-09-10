@@ -115,13 +115,45 @@ function slackFor(keyword: string): number {
   return 2;
 }
 
-/** Whether a word from the receipt is one of these keywords, damage allowed. */
+/**
+ * Below this, a keyword is too short to go looking for inside another word.
+ *
+ * "net", "sum", "vat" and "card" turn up inside ordinary words — a compound rule
+ * that fired on those would start reading product names as totals. At five
+ * characters and up the coincidence stops being plausible.
+ */
+const COMPOUND_MIN = 5;
+
+/**
+ * Whether a word from the receipt is one of these keywords, damage allowed.
+ *
+ * Finnish builds compounds by joining words, and a receipt is full of them:
+ * `KORTTIMAKSU` is *kortti* + *maksu*, `KÄTEISMAKSU` is *käteis* + *maksu*,
+ * `KAIKKIYHTEENSÄ` is *kaikki* + *yhteensä*. Comparing whole words misses every
+ * one of them — `korttimaksu` is five edits from `kortti`, so no amount of slack
+ * reaches it.
+ *
+ * That was costing real money on real receipts. `KORTTIMAKSU 13,62` was not
+ * recognised as the card line, so the total's free second reading was thrown
+ * away; and because it was not recognised as a non-item either, it was counted as
+ * a 13,62 purchase, which pushed the item sum *past* the total and turned a
+ * corroborating line into a contradicting one. Two failures from one missing
+ * rule.
+ *
+ * `kaikkiyhteensa` used to sit in `TOTAL_WORDS` as a hand-added compound, which
+ * is the same whitelist this file's header warns about — a list that works until
+ * the next receipt. Looking inside the word removes the list rather than
+ * lengthening it, and that entry is gone.
+ */
 export function matchesKeyword(word: string, keywords: readonly string[]): boolean {
   const folded = deOcr(word);
   if (!folded) return false;
 
   return keywords.some((keyword) => {
     if (folded === keyword) return true;
+    if (keyword.length >= COMPOUND_MIN && folded.length > keyword.length && folded.includes(keyword)) {
+      return true;
+    }
     return editDistance(folded, keyword, slackFor(keyword)) <= slackFor(keyword);
   });
 }
@@ -138,7 +170,7 @@ export function lineHasKeyword(line: string, keywords: readonly string[]): boole
  * they are compared against. "yhteensa" rather than "yhteensä" is not a
  * misspelling here, it is the normalised form.
  */
-export const TOTAL_WORDS = ["total", "yhteensa", "summa", "sum", "kaikkiyhteensa"] as const;
+export const TOTAL_WORDS = ["total", "yhteensa", "summa", "sum"] as const;
 
 /**
  * A second printing of the same figure, which is what makes it checkable.

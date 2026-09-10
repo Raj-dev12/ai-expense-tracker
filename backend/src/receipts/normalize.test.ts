@@ -491,3 +491,48 @@ describe("OCR debris around the shop name", () => {
     assert.equal(findMerchant(["*****", "|||||", "Maito 1,29"]), null);
   });
 });
+
+/**
+ * Finnish joins words together, and a receipt is full of the results.
+ *
+ * Whole-word comparison misses every compound: `korttimaksu` is five edits from
+ * `kortti`, well past any slack a keyword gets. That is not a spelling problem to
+ * be listed around — `kaikkiyhteensa` had already been added to `TOTAL_WORDS` by
+ * hand, which is the whitelist this codebase keeps warning about — so the rule
+ * looks inside the word instead.
+ */
+describe("compound keywords", () => {
+  it("reads KORTTIMAKSU as the card line, not as a purchase", () => {
+    // Both failures this caused, in one receipt. Unrecognised as a payment line,
+    // the total lost its free second reading; unrecognised as a non-item, the
+    // card line was counted as a 13,62 purchase, which pushed the item sum past
+    // the total and made a corroborating line into a contradicting one.
+    const receipt = normalizeReceipt(
+      ["LIDL", "Salaatti 1,99", "Avokado 2,49", "YHTEENSÄ 4,48", "KORTTIMAKSU 4,48"],
+      TODAY,
+    );
+
+    assert.equal(receipt.items.length, 2);
+    assert.ok(
+      !receipt.items.some((item) => /kortti/i.test(item.description ?? "")),
+      "the card line must not be counted among the things bought",
+    );
+    assert.equal(receipt.verdict.kind, "corroborated");
+  });
+
+  it("reads KAIKKIYHTEENSÄ as a total without it being listed", () => {
+    // The entry that used to be hand-added is gone from TOTAL_WORDS, and this
+    // still passes — which is the point of removing it.
+    const receipt = normalizeReceipt(["KAUPPA", "Maito 1,29", "KAIKKIYHTEENSÄ 1,29"], TODAY);
+    assert.equal(receipt.total, 1.29);
+  });
+
+  it("does not go looking for short keywords inside other words", () => {
+    // "sum", "net", "vat" and "card" appear inside ordinary words, so the
+    // compound rule starts at five characters. A product whose name contains one
+    // of them is still a product.
+    const receipt = normalizeReceipt(["KAUPPA", "Vatkain 9,90", "YHTEENSÄ 9,90"], TODAY);
+    assert.equal(receipt.items.length, 1);
+    assert.equal(receipt.total, 9.9);
+  });
+});

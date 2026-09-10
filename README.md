@@ -692,13 +692,38 @@ there is neither, so the objection stopped applying rather than being overruled.
 
 ### What it can and cannot read
 
-**It works on a flat, well-lit receipt photographed straight on. It does not work on a typical
-crumpled thermal receipt, and no amount of further tuning will change that.**
+**It does not reliably read a receipt. Measured across ten real receipts in four conditions, it
+extracted zero correct totals — including all three that were flat, well lit and photographed
+straight on.**
 
-That is measured, not guessed. Two real receipts came back at 51% and 45% recognition
-confidence, with output that was mostly noise — a total line that survived as
-`YHTEENSI iG i tk a`, and lines like `Mi > FS st E S KS` where the print had been. The parser
-was never given anything to parse.
+This section previously claimed it worked on exactly those flat, well-lit receipts. That claim
+came from two photos and no scoring. Measuring it properly, against totals typed off the paper by
+hand, showed it was wrong. It is corrected here rather than quietly deleted, for the same reason
+the receipt-scanning reversal further up got a row in the decisions table instead of an edit.
+
+**What did work is the part that was designed to.** Not one of those ten failures was presented
+as a success. Zero silent wrong answers: every total that came out wrong was either contradicted
+by the arithmetic checks or absent altogether, so nothing plausible-but-wrong reached the confirm
+step. None of the ten receipts prints a date; nine correctly came back with no date, and the
+tenth invented one out of a run of digits shaped like `05-06-24` — a narrow, now-documented hole
+in `findDate`.
+
+That distinction is the entire point of the design. The feature does not currently do its job,
+and it does not lie about it. An honest failure is recoverable by typing the expense; a confident
+wrong number is not.
+
+**Why it fails is not yet established, and the two candidates need opposite fixes.** Either the
+totals never survived recognition — a pixel problem, which better preprocessing can address — or
+they survived and the parser failed to find them, which no amount of image processing touches.
+The comparison bench at `frontend/compare.html` records, for every receipt, whether the total's
+digits appeared in the recognised text and what the parser actually matched. Those two answers
+are what separate the cases, and no preprocessing work is justified until they have been read.
+
+Separately, and not the open question: **a crumpled thermal receipt is beyond this engine, and no
+amount of tuning will change that.** Two such receipts came back at 51% and 45% recognition
+confidence with output that was mostly noise — a total line surviving as `YHTEENSI iG i tk a`,
+and lines like `Mi > FS st E S KS` where the print had been. The parser was never given anything
+to parse.
 
 The reason is what Tesseract is. It is an OCR engine trained on clean printed document text:
 flat pages, dark ink on white, straight baselines. A crumpled thermal receipt breaks several of
@@ -708,8 +733,11 @@ can only fix *global* problems: overall exposure, overall contrast, orientation.
 *local* distortion, and no global contrast stretch or deskew touches it.
 
 The preprocessing here does what it usefully can — EXIF orientation, scaling, greyscale and a
-contrast stretch. Adding local (Sauvola) binarisation would help a flat receipt shot in poor
-light, which is a real case worth having. It would not rescue a creased one.
+contrast stretch. Local (Sauvola) binarisation and perspective correction are the two techniques
+still missing, and they are the obvious next step *if* the flat receipts turn out to be failing
+at the pixels. If they are failing at the parser instead, both would be aimed at the wrong thing,
+which is why the bench came before either of them. Neither would rescue a creased receipt in any
+case.
 
 **What would fix it is a different reader, not a better photograph.** A vision model handles
 crumpled receipts because it is not matching glyph shapes at all. The seam for that already
@@ -722,8 +750,9 @@ It is not built, because it needs an API key and this project's rule is that eve
 without one. The shape that would keep both is Tesseract as the no-key default and vision as the
 path when a key is present.
 
-So: useful for a receipt you have flattened out and photographed carefully, and honest about
-failing otherwise. Everything below is still worth reading — the arithmetic that checks a total
+So: not currently usable for reading a receipt, on any of the ten photographs it was measured
+against, and visibly rather than quietly so. Everything below is still worth reading — the
+arithmetic that checks a total
 does not care which reader produced it, and becomes *more* useful with a better one, since it
 stops firing on noise and starts catching real misreadings.
 
@@ -1003,9 +1032,11 @@ answers a different question.
 
 ## What is not built
 
-**Receipt scanning reads flat, well-lit receipts and fails on crumpled thermal ones.** Measured
-at 51% and 45% confidence on two real receipts, output mostly noise. The limit is Tesseract, not
-the preprocessing or the parser — see "What it can and cannot read" above.
+**Receipt scanning does not reliably read a receipt.** Measured across ten real receipts in four
+conditions: zero correct totals, including all three that were flat, well lit and shot straight
+on. It fails visibly rather than silently — zero wrong totals were presented as trustworthy — but
+it fails. Whether the cause is the pixels or the parser is being measured; see "What it can and
+cannot read" above.
 
 Written down plainly, because a README that quietly implies more than exists is worse than
 one that admits the gaps.

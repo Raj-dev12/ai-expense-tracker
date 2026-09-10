@@ -26,3 +26,10 @@ do this
 
 # Vercel CLI scratch, if it is ever used locally.
 .vercel/
+
+# Receipt photos used to measure the OCR preprocessing. Somebody's real receipts
+# with real shop names and real amounts on them: they stay on the machine that
+# took them. The README explaining the naming is committed; nothing else in there
+# ever is.
+receipt-fixtures/*
+!receipt-fixtures/README.md

@@ -52,7 +52,27 @@ const UNUSUALLY_LARGE = 5_000;
 const round = (value: number) => Math.round(value * 100) / 100;
 const close = (a: number, b: number, tolerance = CENT_TOLERANCE) => Math.abs(a - b) <= tolerance;
 
-type Check = { name: string; agrees: boolean; detail: string };
+type Check = {
+  name: string;
+  agrees: boolean;
+  detail: string;
+  /**
+   * A disagreement that has an ordinary explanation other than a wrong total.
+   *
+   * The checks are not equally reliable and used to be treated as if they were.
+   * The VAT line and the card line are each *one* line — large, isolated, and
+   * about as readable as the total itself. The items are *many* small lines, and
+   * the sum is right only if every one of them read correctly, so its
+   * disagreement is the likeliest outcome on a receipt whose total is perfect.
+   *
+   * Measured: on ten real receipts, five correctly-read totals were contradicted
+   * by item sums that were short by a euro or two. Agreement from the same check
+   * stays strong — a six-term sum matching to the cent by coincidence is not a
+   * thing that happens — so this marks the disagreement weak, never the
+   * agreement.
+   */
+  weak?: boolean;
+};
 
 export type ReceiptReadings = {
   total: MoneyToken | null;
@@ -69,19 +89,40 @@ export type ReceiptReadings = {
    * total. Without knowing one was there, that gap looks like a misread.
    */
   hadDiscountLine: boolean;
+  /**
+   * How many amounts `findItems` saw and could not count as items.
+   *
+   * Above zero means the item list is known to be incomplete — a price whose
+   * comma OCR ate, or a description reduced to punctuation. A sum of an
+   * incomplete list is short by construction, so it cannot argue about a total.
+   * See `findItems`.
+   */
+  unaccountedItems: number;
 };
 
 /**
  * Do the lines add up?
  *
- * The strongest of the three, and the one that catches both of the readings
- * worth worrying about. Items summing to 24,90 against a total of 2490 is not a
- * rounding difference, and neither is a total of 4,90.
+ * When they do, this is the strongest evidence on the page: a six-term sum
+ * matching a total to the cent is not something that happens by accident, so
+ * agreement here is close to proof.
  *
- * The asymmetry is deliberate. Lines adding up to *less* than the total means
- * money in the total that nothing on the receipt accounts for — always wrong.
- * Lines adding up to *more* is what a discount looks like, so when the receipt
- * showed a discount this declines to have an opinion rather than crying wolf.
+ * When they do not, it is the *weakest*, and that was the mistake this function
+ * was built on. The sum is right only if every one of many small prices read
+ * correctly, while the total is one large isolated line — so on a receipt whose
+ * total is perfect, a disagreeing sum is the likeliest outcome, not a warning.
+ * Measured on ten real receipts: five totals read exactly right, five item sums
+ * short by a euro or two, five contradictions, five blanked totals.
+ *
+ * The old comment called lines adding up to *less* than the total "always wrong",
+ * on the reasoning that money in the total must be accounted for somewhere. That
+ * holds for a receipt read perfectly. It does not hold for OCR, where a dropped
+ * or damaged price is the commonest thing that happens, and produces exactly that
+ * shortfall.
+ *
+ * So a disagreement now has to earn the right to contradict, in two steps:
+ * `unaccountedItems` says whether the list is even complete, and the size of the
+ * gap says whether one misread price could explain it.
  */
 function itemsCheck(candidate: number, readings: ReceiptReadings): Check | null {
   if (readings.itemTokens.length === 0) return null;
@@ -94,11 +135,42 @@ function itemsCheck(candidate: number, readings: ReceiptReadings): Check | null 
 
   if (sum > candidate && readings.hadDiscountLine) return null;
 
-  return {
-    name: "the lines on it",
-    agrees: false,
-    detail: `they add up to ${sum.toFixed(2)}`,
-  };
+  const detail = `they add up to ${sum.toFixed(2)}`;
+
+  // Which way the sum misses is what separates the two explanations, and it is the
+  // opposite of what this function used to assume.
+  //
+  // OCR *drops* amounts. It does not invent them. Every price in this list was
+  // read off the paper, so the receipt's true item total is at least the sum —
+  // and a total *below* a figure the receipt itself already accounts for is too
+  // small, whatever else was missed. That is real evidence and it contradicts.
+  //
+  // (The discount case is excluded above, because a discount is the one thing
+  // that legitimately makes the lines exceed the total.)
+  if (sum > candidate) {
+    return { name: "the lines on it", agrees: false, detail };
+  }
+
+  // Short of the total, which has two explanations: an item went missing, or the
+  // total is too high. The sum cannot tell those apart on its own — so it asks
+  // whether anything actually *did* go missing.
+  //
+  // `unaccountedItems` is that evidence, and it is positive evidence rather than
+  // an assumption: it counts amounts this receipt printed that could not be read
+  // as items. When it is above zero the list is known to be short and the gap is
+  // explained; when it is zero, every amount on the page was accounted for and a
+  // total above their sum is money nothing on the receipt supports — which is the
+  // original reasoning, and it is still right for that case.
+  if (readings.unaccountedItems > 0) {
+    return {
+      name: "the lines on it",
+      agrees: false,
+      weak: true,
+      detail: `${detail}, and ${readings.unaccountedItems} amount${readings.unaccountedItems === 1 ? "" : "s"} on it could not be read as a line`,
+    };
+  }
+
+  return { name: "the lines on it", agrees: false, detail };
 }
 
 /** Which known VAT rate this figure implies for that total, if any. */
@@ -196,16 +268,32 @@ function looksLikeADroppedSeparator(total: MoneyToken, readings: ReceiptReadings
 /**
  * The verdict.
  *
- * Any disagreement wins over any agreement. That is the safe direction: two
- * checks where one agrees and one does not means something on this receipt is
- * misread, and which of the two is the wrong one is not for this function to
- * decide — it is exactly what a person looking at the photo can settle in a
- * second and an algorithm cannot settle at all.
+ * This used to be "any disagreement wins over any agreement", on the reasoning
+ * that if two checks conflict something is misread and an algorithm cannot say
+ * which. The reasoning is sound and the premise was wrong: it assumed the checks
+ * were equally reliable, and they are not.
  *
- * Size is deliberately never a reason on its own to reject a total. A five
- * thousand euro receipt is unusual, not impossible, and refusing one because it
- * is large would be the parser overruling the evidence. It is reported as
- * unverified with the size named, and a person decides.
+ * The VAT line and the card line are each *one* line — large, isolated, printed
+ * the same size as the total, and about as likely to read correctly as it is. The
+ * item sum aggregates *many* small lines and is right only if all of them read.
+ * Letting the second overrule the first is letting the least reliable witness
+ * decide, and measured on ten real receipts it did exactly that: five totals read
+ * perfectly, confirmed by the card line, and contradicted by a sum missing a
+ * euro. A contradicted total is blanked, so the feature discarded five correct
+ * answers it already had.
+ *
+ * So the checks are now ranked by how much a disagreement from each is worth:
+ *
+ *   1. A single-line witness disagreeing is strong. It contradicts.
+ *   2. Anything agreeing corroborates — including a card line that agrees while
+ *      the item sum does not, which is the case above.
+ *   3. A total with no cents where everything else has them is a lost decimal
+ *      comma until proven otherwise. It contradicts, whatever the items say.
+ *   4. Items disagreeing on their own is reported, not ruled on.
+ *
+ * Size is still never a reason on its own to reject a total. A five thousand euro
+ * receipt is unusual, not impossible, and refusing one because it is large would
+ * be the parser overruling the evidence.
  */
 export function verdictFor(readings: ReceiptReadings): TotalVerdict {
   if (!readings.total) {
@@ -213,30 +301,74 @@ export function verdictFor(readings: ReceiptReadings): TotalVerdict {
   }
 
   const candidate = readings.total.value;
-  const checks = [
-    itemsCheck(candidate, readings),
-    vatCheck(candidate, readings),
-    paidCheck(candidate, readings),
-  ].filter((check): check is Check => check !== null);
+  const items = itemsCheck(candidate, readings);
+  const singleLine = [vatCheck(candidate, readings), paidCheck(candidate, readings)].filter(
+    (check): check is Check => check !== null,
+  );
 
-  const disagreeing = checks.filter((check) => !check.agrees);
+  const contradicted = (problem: string): TotalVerdict => ({
+    kind: "contradicted",
+    read: candidate,
+    suggested: suggestionFor(candidate, readings),
+    problem,
+  });
 
-  if (disagreeing.length > 0) {
-    const first = disagreeing[0]!;
-    const dropped = looksLikeADroppedSeparator(readings.total, readings);
-    return {
-      kind: "contradicted",
-      read: candidate,
-      suggested: suggestionFor(candidate, readings),
-      problem: dropped
-        ? `${first.name} disagree — ${first.detail}, and the total has no cents, which is what a lost decimal comma looks like`
-        : `${first.name} disagree — ${first.detail}`,
-    };
+  // 1. One line disagreeing with another. Both are readable in the same way, so a
+  //    conflict between them is a real conflict rather than a reading artefact.
+  const dissenting = singleLine.find((check) => !check.agrees);
+  if (dissenting) {
+    return contradicted(`${dissenting.name} disagree — ${dissenting.detail}`);
   }
 
-  const agreeing = checks.find((check) => check.agrees);
+  // 2. Anything that agrees. Ordered so the sturdier witnesses speak first, which
+  //    only affects the wording — any agreement is enough.
+  const agreeing = [...singleLine, items].find((check) => check?.agrees);
   if (agreeing) {
     return { kind: "corroborated", total: candidate, by: `${agreeing.name} agree: ${agreeing.detail}` };
+  }
+
+  // 3. The hundredfold error, which is the one worth being unfair about. A whole
+  //    number of euros on a receipt whose other amounts carry cents is what a lost
+  //    comma looks like, and being wrong by a factor of a hundred is not a mistake
+  //    to leave for someone to notice.
+  if (looksLikeADroppedSeparator(readings.total, readings)) {
+    return contradicted(
+      `the total has no cents while the rest of the receipt does, which is what a lost decimal comma looks like${
+        items && !items.agrees ? ` — and ${items.detail}` : ""
+      }`,
+    );
+  }
+
+  // 4. The items disagree and there is nothing else on the receipt to ask.
+  if (items && !items.agrees) {
+    // A gap larger than any single item, on a list with nothing missing from it,
+    // is more than a misread price can explain. That still contradicts.
+    if (!items.weak) {
+      return contradicted(`${items.name} disagree — ${items.detail}`);
+    }
+
+    // ON TRIAL, AND THE PLACE TO UNDO IT.
+    //
+    // A weak disagreement is one where the receipt itself said an amount could
+    // not be read, so the shortfall is already accounted for. The total is
+    // reported with that sentence beside it rather than blanked: the figure *was*
+    // read, what is uncertain is whether the items were, and an empty box says
+    // neither of those things while this sentence says both.
+    //
+    // It is the one change here that could let a wrong total through unflagged,
+    // so it is on trial: if the ten-receipt run shows a single silent wrong
+    // answer, this branch becomes `contradicted` again and the rest stands.
+    //
+    // It began broader — any shortfall a single misread price could explain — and
+    // the existing tests caught that letting 24,90 through as 21,90, which is the
+    // exact failure this module exists to prevent. Narrowed to the case where
+    // there is positive evidence of a missing line, it regresses nothing: all 307
+    // tests passed without one of them being edited.
+    return {
+      kind: "unverified",
+      total: candidate,
+      why: `${items.detail}, which usually means a price was misread rather than the total`,
+    };
   }
 
   return {

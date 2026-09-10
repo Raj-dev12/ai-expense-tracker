@@ -620,6 +620,266 @@ unreachable.
 - [ ] `learnings.md` complete
 - [ ] Repository pushed to GitHub and made public
 
+
+## Improving the Tesseract path: measuring first
+
+The two techniques the README named as genuinely missing — adaptive local binarisation
+(Sauvola) and perspective correction — are worth having for flat receipts shot in poor light
+or at an angle. Neither fixes creasing, and nothing here claims otherwise.
+
+Before writing either one, a way to tell whether they helped.
+
+- [x] Asked the question that decides the design: what measure says a step helped, given that
+      the engine's confidence rises whenever an image is sharpened whether or not the letters
+      were right? Answer: hand-typed ground truth, and a count of wrong totals that the
+      arithmetic checks did *not* flag
+- [x] Named the trap in using the arithmetic verdict for this. It is the right thing to choose
+      a preparation with and therefore the wrong thing to score one with — a measure that picks
+      its own winner can only go up. The verdict selects; the typed labels measure
+- [x] `receipt-fixtures/`, gitignored except for its README. Real receipts with real shop names
+      stay on the machine that took them. Not `frontend/public/`, which is served in development
+      and copied into a production build
+- [x] Four buckets by filename prefix: `flat` (the regression guard — these read correctly today
+      and must not get worse), `dim`, `angled`, `creased` (expected to stay broken, there to catch
+      a change that "improves" noise into something resembling a reading)
+- [x] `frontend/src/receipts/score.ts` — scores a reading against the typed truth. Fields come
+      out `right`, `wrong` or `missing`, kept apart because a blank field is visible and a wrong
+      one is not. The total is crossed with whether the checks flagged it, giving the one count
+      that decides a step: wrong and uncontradicted
+- [x] Also counts whether each truth value was in the raw text at all. That is the difference
+      between a photo problem and a parser problem, and preprocessing can only move the first
+- [x] `compare.html` + `frontend/src/receipt-compare.tsx` — a dev-only bench. Loads the photos,
+      takes the labels, runs every preparation in `prepare.ts` over each photo with one shared
+      worker, and shows a scoreboard plus the prepared image and raw text for every attempt
+- [x] `PREPARATIONS` in `prepare.ts`, with the current pipeline as its only entry. The app still
+      calls `prepareForOcr` and is unaffected; the new techniques become entries beside it
+- [x] Verified the bench cannot ship: `vite build` produces `index.html` and no `compare.html`
+- [x] Verified nothing broke: 367 render checks pass, `tsc --noEmit` clean
+
+Answered about making things worse, and designed against it rather than hoped about:
+
+- A global stretch followed by Sauvola is not Sauvola. The stretch inflates local contrast, and
+  Sauvola's threshold formula assumes a dynamic range it no longer has — it gets more aggressive
+  in exactly the direction that erases thin thermal print. So "Sauvola instead of the stretch" has
+  to be a separate entry in the grid, not only "Sauvola after it"
+- Sauvola also replaces grey with two values, reversing a deliberate decision recorded in the
+  table: Tesseract thresholds better from grey. A stroke it deletes cannot be recovered
+- Sauvola over Niblack because Niblack degenerates on blank paper, and a receipt is mostly blank
+  paper
+- For perspective, the warp is safe and the *detection* is the risk. A receipt on a pale table
+  has no edge to find, so a shadow or a fold becomes the outline; a torn bottom edge misplaces
+  two corners and shears the lower third. Even a correct detection on a straight-on photo costs a
+  resample that small thin text pays for. So it is gated, and skipped outright when the detected
+  quadrilateral is already near-rectangular
+- The structural answer: both become *attempts*, not replacements. Read with the current
+  preparation; if the verdict is corroborated, stop — that receipt never sees Sauvola. Only a
+  contradicted, absent or empty reading tries the enhanced preparation and keeps the better
+  verdict. The worst case becomes slower rather than worse
+
+### The fixture receipts have no dates on them, which turned out to be the useful case
+
+Ten photos added across the four buckets, and none of them prints a date. The bench required
+all three fields before it would run a photo, so it blocked on a field that does not exist.
+
+- [x] Only the total gates a run now. Every other field is scored when a truth for it exists and
+      left out of the counts when it does not — `unscored` is a separate outcome from `missing`,
+      so an unrecorded field is not counted as a failed read
+- [x] A "no date on it" tick, which is a different statement from an empty box and worth far
+      more. It says the correct answer is *no date*, so any date the parser returns is an
+      invention with nothing on the paper behind it
+- [x] `dateInvented` broken out of `date: "wrong"` and given its own column on the scoreboard.
+      Misreading a date that was there and conjuring one that never was are not the same failure
+- [x] Probed the actual risk rather than asserting it: `05-06-24` in a product code becomes
+      5 June 2024. A phone number, a till number, a business id, a card number and a dotted price
+      were all correctly refused. So the exposure is one shape, not a general problem
+- [x] 367 render checks, 307 backend tests, `tsc --noEmit` clean
+
+Not fixed, and deliberately: on a real receipt `05-06-24` genuinely could be the date, so
+tightening `NUMERIC_DATE` is a decision about what counts as evidence — not a bug fix, and not
+one to make quietly in the middle of building a measuring instrument.
+
+
+### The baseline: zero correct totals out of ten
+
+Ten receipts, four conditions, current preparation. Zero correct totals — including all three
+flat, well-lit, straight-on ones. Zero silent wrong answers. Nine of ten dates correct (all ten
+receipts print no date; nine correctly returned none) with one invented, which is the
+`05-06-24` hole predicted and probed before the run.
+
+- [x] The design's own claim held up: not one wrong total was presented as trustworthy. Every
+      failure was contradicted or absent. The feature does not work and does not lie about it
+- [x] README corrected in three places. It claimed "it works on a flat, well-lit receipt
+      photographed straight on" — measured against ten photos and hand-typed totals, that is
+      false. The correction says what was measured, says the cause is not yet established, and
+      says explicitly that the old claim came from two photos and no scoring
+- [x] Also corrected the "What is not built" summary, which repeated the same claim
+- [x] The Sauvola sentence in the README no longer promises a benefit. It now says both
+      techniques are the next step *if* the flat receipts are failing at the pixels
+
+Diagnosing which kind of failure this is, before building anything:
+
+- [x] `sources.total` surfaced — the text the backend actually matched as a total. It was in the
+      response all along and was not being shown. With `digits in text` beside it, the three-way
+      split becomes readable: digits absent means the pixels lost the number; digits present with
+      nothing matched means the number survived and the line around it did not; digits present
+      with something matched means the parser chose wrongly
+- [x] Item count and the verdict's own sentence added to the same block, since zero items read
+      means the strongest arithmetic check had nothing to work with
+- [x] A copy-out of the whole run as text, with the raw lines under each attempt. The bench
+      renders into a browser, which is the right place to look at results and the wrong place to
+      get them out of, and this grid will be produced several more times
+- [x] Looked at the flat receipts directly. Both are the same Lidl receipt: crisp, flat, evenly
+      lit, and arithmetically perfect — six items summing to exactly 13,62, with `YHTEENSÄ 13,62`
+      and `Korttimaksu 13,62` repeating it. If that fails, the photograph is not the problem
+
+A third hypothesis, and the reason the next run tests it:
+
+- [x] `tesseract.ts` sets no page segmentation mode, so the engine runs its default: full
+      automatic layout analysis, which includes splitting a page into columns. A till receipt is
+      two columns with a wide gutter, which is exactly the shape that analysis separates. If it
+      does, `YHTEENSÄ` and `13,62` land on different text lines and `findTotal` — which wants a
+      keyword and an amount on one line — cannot match, on a receipt that is perfectly legible
+- [x] `SINGLE_BLOCK` added to the bench as a second axis, crossed with every preparation. One
+      extra pass per photo settles it. Named through the engine's own enum rather than the
+      number 6
+- [ ] Read the next run. If the totals are absent from the text, preprocessing is aimed
+      correctly. If they are in the text and unmatched under automatic layout but matched under
+      one block, the fix is a one-line engine setting and neither Sauvola nor perspective
+      correction is worth building yet
+
+
+### The corroboration design assumed items read as well as totals. They do not
+
+The bench found the real problem, and it was not the pixels and not the layout. Totals are read
+correctly on half the receipts; the item sums are not, and the checks let the item sum overrule
+everything else. Five correct totals were being blanked.
+
+- [x] **The checks are ranked rather than tallied.** "Any disagreement wins over any agreement"
+      assumed they were equally reliable. The VAT and card lines are one line each, large and
+      isolated, about as readable as the total; the item sum aggregates many small prices and is
+      right only if all of them read. A disagreeing card line still contradicts. A disagreeing
+      item sum, on its own, mostly does not
+- [x] **An item sum that *exceeds* the total still contradicts.** OCR drops amounts, it does not
+      invent them, so the receipt's true item total is at least the sum and a total below it is
+      too small. This is what keeps 24,90-as-21,90 and 24,90-as-4,90 caught. The old code had the
+      asymmetry backwards — it called a shortfall "always wrong", which is right for a perfectly
+      read receipt and exactly wrong for OCR
+- [x] **A shortfall is excused only by positive evidence.** `findItems` now counts the amounts it
+      saw and refused — a price whose comma was eaten, a description reduced to punctuation — and
+      a shortfall is only weak when that count is above zero
+- [x] Change 3 began broader, excusing any shortfall a single misread price could explain. The
+      existing tests caught that letting 24,90 through as 21,90. Narrowed, it regressed nothing:
+      307 tests passed without one being edited
+
+Found while testing, and the larger of the two bugs:
+
+- [x] **`KORTTIMAKSU` matched no keyword at all.** Finnish compounds — *kortti* + *maksu* — are
+      five edits from the keyword, past any slack. It failed twice on the same line: unrecognised
+      as the card line, so the total lost its free second reading; unrecognised as a non-item, so
+      it was counted as a 13,62 purchase, pushing the item sum *past* the total. The one
+      corroborating line on the receipt was being turned into the contradicting one
+- [x] Keywords of five characters or more are now matched inside a word. `kaikkiyhteensa` had
+      already been hand-added to `TOTAL_WORDS` to paper over the same gap — the whitelist this
+      file's own header warns about — and has been removed, because the rule covers it
+- [x] Five characters, because "sum", "net", "vat" and "card" occur inside ordinary words
+
+Verified: 315 backend tests, 367 render checks, both typecheck clean. Probed against the real
+shapes:
+
+```
+corroborated  13.62   all items read, card line agrees
+corroborated  13.62   one price mangled, card line agrees
+unverified    13.62   one price mangled, no card line
+contradicted  null    SAFETY: 24,90 read as 2490
+contradicted  null    SAFETY: 24,90 read as 21,90
+contradicted  null    SAFETY: 24,90 read as 4,90
+unverified    21.90   SAFETY: wrong total AND a mangled price  <- the known hole
+```
+
+### The hole that is on trial
+
+The last line is the residual cost of the relaxation, and it is stated before the re-run rather
+than after. A receipt with **both** a misread total and a mangled item price has its shortfall
+look explained when it is not, so the wrong total is shown rather than blanked. It arrives amber,
+headed "Total not checked", with the sentence saying the lines do not add up and an amount could
+not be read — flagged, but pre-filled, and a pre-filled wrong number is the thing this project
+keeps being bitten by.
+
+The gate was agreed in advance and is one clearly marked branch in `verdictFor`: if the
+ten-receipt re-run shows a single silent wrong answer, it becomes `contradicted` again and
+everything else stands.
+
+- [ ] Re-run the ten. Success is correct totals shown going up with silent wrong answers still
+      zero
+- [ ] The README needs correcting again, in the other direction. Doing it once, after the re-run,
+      rather than swinging it twice in a day
+
+
+### The card line was handing back nonsense, and change 1 gave it the power to matter
+
+Reported from the re-run: three receipts contradicting on card values of 4,00, 7,00 and 1988,00
+while the printed 13,62 was plainly on the same line. Since a card line that agrees now outranks
+a disagreeing item sum, a misparsed one destroys a correct total rather than merely failing to
+confirm it. That weight was created by change 1, so the misparse became its problem.
+
+- [x] Found it by running the real OCR rather than reasoning about it. tesseract.js runs in Node,
+      so the ten fixtures went through it directly and `findTotal` was traced over the output.
+      `angled-02` reproduced the symptom exactly: `"Korttimaksu < 3"` → the amount paid is 3,00
+- [x] The signature was in the reported numbers all along: 4, 7, 1988 and the reproduced 3 are
+      every one of them a **bare integer with no cents**
+- [x] `moneyTokens` accepts a bare integer deliberately — a total that lost its decimal comma is
+      exactly that shape, and catching one is the point of the checks. But a card charge is always
+      printed with cents, so on that line an integer is not a reading, it is debris
+- [x] The card line now takes the last amount *with cents*. That fixes both halves: the fragment
+      that survived a destroyed amount, and the trailing debris that wins because `lastAmount`
+      takes the last token and the VAT class letter comes after the amount
+- [x] `findItems` has applied this same rule to prices all along, with a comment explaining why.
+      The payment line simply never got it
+- [x] One existing test changed meaning: a card line reading `2490` against a total of `24,90`
+      asserted `contradicted`, which threw away a correct total because the *card* line was the
+      damaged one. It is now `unverified` with the total carried, and the case it was written for
+      — two legible readings that differ — is its own test with `29,40`
+
+Re-measured over all twenty runs (ten photos, both segmentation modes), scored against the
+totals typed off the paper:
+
+```
+total read correctly   11 / 20
+shown to the user      10
+SILENT WRONG ANSWERS    0
+```
+
+The spurious `paid=3` is gone. 317 backend tests, 367 render checks, both typecheck clean.
+
+### Found while measuring, not fixed, awaiting a decision
+
+`flat-01` under automatic layout still contradicts a correct 13,62, and the reason is a different
+pre-existing bug: the multi-buy sub-line `3 x 0,45 EUR` is counted as a purchase.
+
+```
+items: ... {"description":"Ruispala","amount":1.95},
+           {"description":"x EUR","amount":0.45},   <- not a thing bought
+```
+
+Lidl prints a quantity breakdown under any multi-buy item and its money is already in the line
+above, so counting it inflates the sum past the total — which, under the new direction rule, is a
+*strong* disagreement and blanks the total. A line of the shape `<n> x <price>` is a unit-price
+breakdown, and excluding it is small and self-contained.
+
+Not built. It is a second change to the same measurement, and attributing effects to one change
+at a time has been the whole method here.
+### Next
+
+- [x] Labelled photos from the four buckets, and a baseline run recorded
+- [x] Settled: not the pixels, not the layout — the item sums, and the checks trusting them
+- [ ] Sauvola and perspective correction: parked. The totals are being read; small dense item
+      prices are the bottleneck, and neither technique meaningfully helps those
+- [ ] Decide on the `3 x 0,45` quantity sub-line being counted as a purchase — found while
+      measuring, small and self-contained, deliberately not built yet
+- [ ] The escalation in `tesseract.ts`, once the grid says which variant is worth escalating to
+- [ ] `ReceiptDiagnostics` to name which preparation produced the reading on show, and list what
+      was tried and rejected. The panel keeps showing the prepared image of the winning attempt,
+      because the word boxes are in that image's coordinates
 ---
 
 ## Blockers
