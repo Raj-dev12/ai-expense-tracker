@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lte, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { CONVERTIBLE_CURRENCIES, convertToBase, isConversionEnabled } from "../fx/rates.js";
 import { expenses } from "../db/schema.js";
@@ -112,6 +112,48 @@ export async function categoryTotalsBetween(userId: string, from: string, to: st
   // is noise.
   return rows.map((row) => ({
     category: row.category,
+    totalBase: money(row.total),
+    count: row.count,
+  }));
+}
+
+/**
+ * What each day in a window came to, added up by PostgreSQL.
+ *
+ * The calendar grid's numbers. It sits here beside the pie's totals for the same
+ * reason the pie's do: the app must have exactly one definition of "what you
+ * spent", and a second one written in the browser would be free to disagree with
+ * this one. The browser could add the expenses up itself — it already has a
+ * month of them on screen — but it would have to turn each decimal string into a
+ * JavaScript number to do it, and adding floats is precisely what the decimal
+ * column exists to avoid. `numeric` addition in the database is exact.
+ *
+ * Days with nothing in them are left out rather than sent as zeroes, the same as
+ * empty categories are. The grid has to build all six weeks of cells whatever
+ * comes back, so filling the gaps costs it nothing.
+ */
+export async function dailyTotalsBetween(userId: string, from: string, to: string) {
+  const rows = await db
+    .select({
+      // Formatted in SQL rather than trusted to come back as a string, which is
+      // what the trend query does with its week buckets.
+      date: sql<string>`to_char(${expenses.expenseDate}, 'YYYY-MM-DD')`,
+      total: sum(expenses.amountBase),
+      count: count(),
+    })
+    .from(expenses)
+    .where(
+      and(
+        eq(expenses.userId, userId),
+        gte(expenses.expenseDate, from),
+        lte(expenses.expenseDate, to),
+      ),
+    )
+    .groupBy(expenses.expenseDate)
+    .orderBy(expenses.expenseDate);
+
+  return rows.map((row) => ({
+    date: row.date,
     totalBase: money(row.total),
     count: row.count,
   }));

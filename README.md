@@ -76,7 +76,7 @@ ways](#deploying-it-two-ways).
 | Piece | What | Why |
 |---|---|---|
 | Backend | TypeScript, Fastify, Drizzle, PostgreSQL, Zod | Zod validates every input crossing a boundary. Money is `numeric(12,2)` — a decimal column, never a float. Every row stores what was spent and its value in the base currency. |
-| Frontend | TypeScript, React, Vite, Tailwind, Recharts | One page, no router. Light theme, one accent colour. |
+| Frontend | TypeScript, React, Vite, Tailwind, Recharts | One page, no router. Light theme, one accent colour. Two columns from 1280px. |
 | AI | `@anthropic-ai/sdk`, `openai`, and an offline mock | One `ExpenseParser` interface, three implementations, chosen by an environment variable. |
 | MCP | `@modelcontextprotocol/sdk` over stdio | Seven tools, each calling the backend's HTTP API rather than the database. |
 | Serving | Caddy | Serves the built frontend, proxies `/api`, and obtains HTTPS certificates by itself. |
@@ -357,9 +357,71 @@ wide but now ends where the period ends, so stepping to July shows the fourteen 
 July. Both simpler answers are wrong: pinned to today it is one chart on a July dashboard
 describing September, and squeezed into the period it draws "today" as a single point.
 
-The day view is the deliberate exception. It has its own date picker and answers a different
-question — what was spent on one named day — and moving to another day is meant not to refetch
-the charts.
+The calendar is the deliberate exception. It is a month grid with each date showing that day's
+total, and it has its own back and forward month arrows, independent of the period stepper —
+two controls doing two jobs, so choosing a day in September does not move a dashboard somebody
+is reading July on. It names its own month in its heading for that reason. Stepping it leaves
+the chosen day where it is: a selected day is a thing somebody picked, not a cursor following
+the view.
+
+Clicking a date drives the table underneath it, which answers a different question — what was
+spent on one named day — and moving to another day is meant not to refetch the charts. That
+table used to carry a date picker of its own; the calendar replaced it and is now the only way
+to choose a day.
+
+Its numbers come from `GET /api/analytics/daily` rather than from adding up a month of expenses
+in the browser. That mirrors the pie, which has the same two halves: an endpoint for the
+aggregate, and plain `GET /api/expenses` for the rows behind whatever you click. Summing in the
+browser would have worked and cost almost nothing — the objection is that the app would then
+hold two definitions of "what you spent", free to disagree, and could only reach them through
+floating-point addition of figures the decimal column exists to keep exact.
+
+A day with nothing in it shows its number and nothing else, never `€0.00`, which would look
+like data and bury the days that have something in them. It is still clickable. The days either
+side of the month are drawn faintly and are inert, so the grid keeps its shape at the corners
+without ever taking you into a month its heading is not totalling.
+
+## The page, and why it is denser than it was
+
+The layout was built for three sections — add something, see the totals, read the history — and
+grew to carry ten. Whitespace that read as calm at three read as a long walk at ten, so the page
+was widened from 896px to 1280px, the spacing came down by about a third, and from 1280px it
+splits into two columns.
+
+The widening is not a separate preference. Two columns inside the old 896px would have given
+each about 416px, and 416px is the exact width that once squeezed the pie legend to one letter
+per category. Splitting a page and widening it are one decision.
+
+The split starts at 1280px rather than 1024px for a related reason found while building it: at
+1024px the wide column is 587px inside its padding, and the calendar grid needs 640px before it
+starts scrolling sideways. The grid would have begun scrolling at exactly the window width where
+it gained a second column — a card getting narrower as the window gets wider, which is the same
+shape as the legend bug. Between 1024px and 1280px the page stays in one column and simply gets
+wider, which both the calendar and the pie prefer.
+
+Columns are assigned by how much width a panel needs, not by how important it is. The calendar
+needs 640px and the pie wants 576px before its legend can sit beside the chart, so those go in
+the wide column with the day's expenses; the trend line, the expense rows and the category list
+all read fine at 400px and go in the narrow one.
+
+**Four panels fold away**: the written analysis, the day's expenses, the expenses list and the
+categories panel. Only the categories panel starts folded, on a rule worth stating — a panel
+starts closed only if it is a tool you go looking for, never if it is information you would
+read. A first-time visitor lands on one closed strip, not a page of shut boxes. The charts and
+the calendar do not fold at all, because a chart's whole value is being read without being asked
+for.
+
+A folded panel keeps its heading and a one-line summary of what is inside — "Expenses · 92
+expenses" — so a closed box is a labelled strip rather than a blank one. The analysis card's
+header is split from its body so that the period dropdown stays visible when the card is folded:
+it governs every number on the page, and a global control that hides itself is a bad control.
+Clicking a date in the calendar forces the day panel open, because the calendar is the only way
+to reach a day and a click that appears to do nothing is the feature appearing to do nothing.
+
+Which panels you have folded is remembered in `localStorage`. It is per-browser, never reaches
+the server, and is read back through a Zod schema like every other input — the text there may
+have been written by an older version of this code. Anything that does not parse falls back to
+the defaults: a corrupt preference should cost you your layout, not the page.
 
 ## The AI safety pattern
 
@@ -385,6 +447,7 @@ Three things fall out of this:
   The MCP server uses it. Nothing has a private back door to the table.
 - **The promise is checked, not trusted.** The parse response includes `saved: false`, and the
   browser asserts that field with Zod on every single call.
+- **A guess it cannot make is a gap, not a default.** See the section below.
 - **All three AI endpoints make the same promise.** `parse-expense`, `monthly-summary` and
   `ask` each return `saved: false`, and each is asserted the same way. Nothing an AI touches
   in this application writes a row.
@@ -392,6 +455,63 @@ Three things fall out of this:
 The `source` column records whether a row came from the web form, the MCP server or the seed
 script — so you can prove that an AI assistant really did write to the database, and by which
 route.
+
+## What the parser does when it cannot work something out
+
+It says so, and leaves the field empty. That sounds obvious and it is the thing this project has
+got wrong three separate times, in three different features, always the same way.
+
+The reported version: **"53 euros for clothes at uniqlo on sept 4" was filed under today.** The
+parser had never understood month names, and its answer when it understood nothing was today's
+date — a value shaped exactly like a correct one. The confirm step showed it, and there was
+nothing there to catch. Compare the pie legend truncating "Bills" to "B", and the trend chart
+describing September under a July dashboard: in all three, nothing errored, nothing warned, and
+the wrong output looked as deliberate as the right one. The common cause every time is **a
+fallback that produces a plausible value rather than an absent one.**
+
+So the date step has three outcomes rather than two:
+
+| The sentence | What comes back |
+|---|---|
+| Names no date — "42 euros at lidl" | Today, quietly. This is ordinary and correct. |
+| Names a date it can read — "on sept 4" | That date. |
+| Names something meant to be a date that it cannot read | `null`, and a note saying why. |
+
+The old code had a boolean here, and `explicit: false` meant both "no date was mentioned" and "a
+date was mentioned and I could not read it". Collapsing those two is the entire bug, and it was
+in the type before it was in the behaviour.
+
+An unreadable date leaves the confirm step's date box **empty, ringed, focused, and refusing to
+save**, with the note quoting the text that failed — "“31 february” is not a real date",
+"“4 september 2027” is in the future", "“september” names a month but not a day". That is the
+same treatment a missing amount has always had. An empty box cannot be scanned past the way a
+plausible wrong date can.
+
+### Date formats it reads
+
+Numeric, day first, which is the Finnish convention: `4.9.2026`, `4.9.26`, `4,9,26`, `4/9/26`,
+`4-9-26` — the separator must be the same one twice. ISO `2026-09-04`. Relative phrases:
+"yesterday", "3 days ago", "last friday", "the day before yesterday".
+
+Month names, English or Finnish, full or abbreviated, in either order, with or without a year:
+
+```
+sept 4            4 sept              September 4th        4 September 2026
+Sep 4, 2025       1st august          4. syyskuuta         syyskuun 4.
+15. joulukuuta 2025                   3. kesäkuuta         3. kesakuuta
+```
+
+Finnish months are compounds ending in *kuu*, and a written date puts them in the partitive —
+*syyskuuta*. Each month is stored as one stem plus the endings a date takes, so *syys*,
+*syyskuu*, *syyskuuta*, *syyskuussa* and *syyskuun* are all one entry. Spellings without the
+umlaut are accepted too, because a phone keyboard set to English does not give you ä.
+
+**A day and month with no year mean the most recent occurrence on or before today.** "sept 4"
+typed in October is this year; the same words typed in August are *last* September, because
+September has not happened yet — and somebody writing an expense is recording something already
+spent. A year that was actually written is taken at its word instead: "4 September 2026" typed
+in August is reported as being in the future rather than quietly moved to 2025, because
+inference is for what somebody left out, not for overriding what they typed.
 
 ## It runs with no API key
 
@@ -460,6 +580,158 @@ it rather than having to remember it.
 
 With no API key the offline rules handle a narrow set of patterns and refuse everything else,
 so the refusal paths are the ordinary experience rather than something you only see with a key.
+
+## How a sentence is taken apart
+
+Each step finds the one thing it understands, hands back the exact words it used, and those
+words are removed before the next step runs. So no two steps can read the same characters, and
+the order runs most-constrained first: date, then amount and currency, then the merchant.
+
+That ordering is why `31,08,26` is read as a date rather than as three hundred and ten thousand.
+Both readings are individually correct; only the order decides which wins.
+
+**The merchant is what survives, not what matches.** This is the part that was rebuilt, after
+"32 euro netflix sept 5" came back with no merchant at all. The step used to know four shapes a
+name could take — after a preposition, two words at the start, a capital letter — and that
+sentence fits none of them: the name sits between the amount and the date with nothing marking
+it.
+
+That is the query box's bug in a second place. A whitelist of phrasings is only ever as complete
+as the imagination of whoever wrote it, and it fails *silently* — a sentence fitting nothing
+produces nothing, with no error to notice. So the question was inverted. Once the date, the
+amount and the currency have been removed, and the words that say what was *bought* are known,
+whatever survives is the name. There is no list of phrasings to walk around, because there is no
+list.
+
+### Telling a name from a thing
+
+The category table used to hold "coffee" and "netflix" in one array, as equally good evidence of
+a category — which they are. But they are different kinds of word, and that conflation was the
+bug underneath the bug:
+
+- **items** are common nouns. They say what was bought: "coffee", "dentist", "cinema".
+- **brands** are proper names. They say what was bought *and where*, because the company is the
+  shop: "netflix", "lidl", "ikea".
+
+With one list the merchant step could only refuse everything in it. With two, an item word says
+"this is not a name" and a brand word says "this is one".
+
+### Splitting the leftover
+
+| The sentence | The name | Why |
+|---|---|---|
+| `coffee and tea at k market` | K Market | a preposition is the boundary: before it is what was bought, after it is where |
+| `s market chocolate 1600,789` | S Market | no marker, so the leading two words, stopping at any word naming a thing |
+| `32 euro netflix sept 5` | Netflix | one word left, and it is a brand |
+| `20 euro Kotipizza` | Kotipizza | one word left, and it is capitalised |
+| `89 eur ikea shelves` | Ikea | a brand is a complete name, so the shelves are what was bought there |
+| `cinema tickets 27` | none | it opens with a thing, not a place |
+| `Coffee 4 eur` | none | capitalised, but still something you buy |
+| `5 constructor` | none | see below |
+
+Two words is the cap when nothing marks where a name ends, because nothing does. "s market
+chocolate" gives up "chocolate", which is the right trade — a name with a stray word on the end
+is worse than a description missing one, since only the name is shown as a heading.
+
+`description` keeps the whole sentence exactly as typed, so the split only decides what gets
+promoted to a name. Nothing a person wrote is lost between typing and confirming.
+
+**What is left ambiguous, deliberately.** A lone unknown lowercase word gets no merchant.
+"32 euro kotipizza" for a shop the brand list has never heard of has the identical shape to
+"32 euro chocolate", and nothing in either sentence says which is which. Guessing would produce
+a merchant that looks exactly as deliberate as a correct one — the same failure as the date
+that quietly became today. The confirm step is where a person settles what a rule cannot, and
+that is what it is for.
+
+## Scanning a receipt
+
+Photograph a receipt, check what was read against the photo, save it. **The image never leaves
+your device.** There is no upload, nothing is stored, and it works with no API key — the text
+recognition is WebAssembly running in the browser, and only the lines of text it produces are
+sent anywhere.
+
+That is also why this feature exists at all. Receipt photos were deliberately out of scope,
+rejected for needing "file uploads and image storage". Doing the reading in the browser means
+there is neither, so the objection stopped applying rather than being overruled.
+
+### The problem worth designing around
+
+OCR does not fail politely. It reads `24,90` as `2490` — a perfectly plausible number that is a
+hundred times too big — and reports high confidence while doing it, because its confidence is
+about how cleanly the pixels matched a glyph, not about whether the number is right. **An
+absent field is visible; a wrong one is not.** This project has had that exact failure three
+times: a pie legend truncating "Bills" to "B", a chart describing the wrong month, a date
+quietly falling back to today. Every time, a fallback produced a plausible value instead of an
+absent one.
+
+So the total is not trusted because the engine felt sure. It is checked, arithmetically, against
+the rest of the receipt — which states the same fact more than once:
+
+| Check | What it catches |
+|---|---|
+| The lines add up to the total | `2490` against lines summing to `24,90`; `4,90` against the same |
+| The VAT is a known rate of the total | a hundredfold error fails 25.5%, 14% and 10% at once |
+| The card line repeats the total | two readings of one number that disagree |
+
+None of those depends on how confident the OCR felt.
+
+### Four verdicts, and four different screens
+
+| Verdict | What you see |
+|---|---|
+| **Checked** | the total filled in, and which check agreed |
+| **Not checked** | the total filled in, marked in amber — nothing on the receipt could confirm it |
+| **Disagrees** | **the amount box empty**, both readings offered as a choice |
+| **No total** | the amount box empty, saying no line said what the total was |
+
+The third row is the point. A wrong total does not arrive tinted red in a filled-in box, because
+a filled-in box gets approved at a glance whatever colour it is. It arrives as *nothing*, the way
+a missing amount already does, and both candidate readings sit beside it — "Use 24.90, what it
+adds up to" and "Use 2490.00, what was printed" — with neither preselected. When the arithmetic
+caught the error it usually also knows the answer, and offering it beats clearing the box to
+nothing; both beat filling one in silently.
+
+The second row matters for a smaller reason: "we read a number" and "we checked a number" are
+different claims, and showing them identically states the first as though it were the second.
+
+### Verifying, not approving
+
+Typing "24.50 at Lidl" means you already know what you meant. Photographing a receipt means you
+may not have read it closely — the figures on screen are the first time you are looking at them
+properly. So the photo sits beside the fields with the total, the date and the shop name **boxed
+on the image**, using the word positions the OCR returned. You can see the pixels each value came
+from. When the total is the thing in doubt, its box is red, so your eye goes to the receipt rather
+than to a field that cannot tell you anything.
+
+Values it could not point at are said so plainly rather than left to be assumed complete.
+
+### What it reads
+
+Damaged keywords, because thermal receipts photograph badly: `TOTAL`, `T0TAL`, `TOTAI`, `Totai`,
+`YHTEENSÄ`, `YHTEENSA`, `SUMMA`. These are not a list of misspellings — a list of misspellings
+works until the next photo. The damage is undone instead: confusable characters folded back
+(`0`→`o`, `1`→`l`, `5`→`s`), accents dropped, then compared with a little slack. That covers
+spellings nobody has seen yet.
+
+Amounts as Europe writes them — `24,90`, `1.234,56`, `1 234,56`, `€24,90`, `24,90 EUR` — reusing
+the same number reader the sentence parser uses. Dates as `04.09.2026`, `4.9.26`, `04/09/2026`,
+`2026-09-04`, `4. syyskuuta 2026`, and `04.09.` with no year at all.
+
+**Anything it cannot determine comes back null rather than guessed.** A receipt with no line
+saying TOTAL gets no total, and you type it. Picking the largest number on the page and hoping
+would produce a figure that looks exactly like a correct one.
+
+### It is still the same door
+
+A scanned receipt reaches the database the way everything else does: `POST /api/expenses`, after
+a person presses save. Nothing is ever added silently. The list shows it as `added by receipt`.
+
+### Running it
+
+The engine and the English and Finnish language data are served from this repository — about
+14 MB under `frontend/public/tesseract/` — rather than fetched from a CDN, so scanning works
+offline and does not depend on a third party staying reachable. The first scan in a browser
+downloads them once and says so while it does.
 
 ## The currency is the first question
 
@@ -598,6 +870,9 @@ DELETE /api/expenses/:id
 GET    /api/analytics/summary   from, to; defaults to this month, vs the days before it
                                 compare=false for a range with no natural predecessor
 GET    /api/analytics/categories  from, to; defaults to this month
+GET    /api/analytics/daily     from, to; defaults to this calendar month
+                                one total per day that has spending; the calendar grid
+                                days with nothing in them are absent, not zero
 GET    /api/analytics/trend       from, to; weekly buckets, fourteen weeks ending where the period does
 GET    /api/categories          the categories, with how many expenses each holds
 POST   /api/categories          add one
@@ -606,6 +881,10 @@ DELETE /api/categories/:name    remove one; ?expenses=reassign or ?expenses=dele
 GET    /api/settings            the currency, whether it was chosen, and the ISO list
 PATCH  /api/settings            change it; writes one column and no amounts
 POST   /api/ai/parse-expense    sentence in, suggestion out, saves nothing
+POST   /api/receipts/read       OCR text in, receipt + suggestion out, saves nothing
+                                the image is never sent; it stays in the browser
+                                expenseDate is null when a date was meant and
+                                could not be read; dateNote says why
 POST   /api/ai/monthly-summary  from, to; a period in a sentence or two, saves nothing
 POST   /api/ai/ask              a question in, a computed answer out, saves nothing
                                 a question that asks two things gets both answered
@@ -633,8 +912,12 @@ one that admits the gaps.
 
 ## Deliberately out of scope
 
-Budgets, recurring expenses, CSV import, receipt photos and multi-user support. All
-reasonable ideas; all would make this a bigger project rather than a clearer one.
+Budgets, recurring expenses, CSV import and multi-user support. All reasonable ideas; all
+would make this a bigger project rather than a clearer one.
+
+Receipt photos were on this list until the reasons for keeping them off stopped holding —
+see "Scanning a receipt" above. Storing the images still is not planned, and neither is a
+table of line items.
 
 ## Repository layout
 

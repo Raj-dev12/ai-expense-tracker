@@ -289,6 +289,234 @@ unreachable.
 - [x] Verified: 138 backend tests, 40 new period checks, the full cycle check, all seven MCP
       tools, and a complete August comparing against a complete July (−7.8%) end to end
 
+## Calendar view
+
+- [x] `GET /api/analytics/daily` — one total per day that has spending, summed by PostgreSQL.
+      The query sits in `lib/figures.ts` beside the pie's, because the app must have exactly
+      one definition of "what you spent"
+- [x] The alternative was fetching a month of expenses and adding them up in the browser. It
+      would have worked and cost almost nothing, and it was still wrong twice over: a second
+      definition free to disagree with the first, and float arithmetic on figures the decimal
+      column exists to keep exact
+- [x] Clicking a date needs no new endpoint. A day is a range whose ends match, so the table
+      reads `GET /api/expenses?from=D&to=D`, exactly as the day view always did
+- [x] Month grid: seven columns starting Monday, matching the trend chart and PostgreSQL's
+      `date_trunc('week', ...)`. Always six rows, so the card does not change height as the
+      arrows are pressed
+- [x] A day with nothing in it shows its number and nothing else — no `€0.00`, which would
+      look like data and bury the days that have something in them. Still clickable, because
+      checking that a quiet day really was quiet is a normal thing to do
+- [x] Days from the months either side are drawn faintly and are inert. Blank padding would
+      lose the grid's shape at the corners; clickable padding would let the grid take you into
+      a month its own heading is not totalling
+- [x] The day view's date picker is gone. The calendar is the only way to choose a day now
+- [x] The calendar's month is its own state, independent of the period stepper, and stepping it
+      leaves the chosen day where it is. It names its month in its heading, because it can be
+      showing a different one from the rest of the page
+- [x] Found while verifying: the API refuses a future date in a filter, so asking for "1 to 30
+      September" on the 9th was rejected outright. The window is clamped to today — the rule
+      the rest of the app already follows, and nothing is lost because there is no spending in
+      the future
+- [x] Found while verifying: two of the new checks were passing for the wrong reason. One
+      matched the word "disabled" and found it in the button's own class list, so it passed on
+      enabled and disabled buttons alike; the other compared an expression with itself
+- [x] `overflow-x-auto` and a minimum width on the grid. Seven columns on a phone leaves a cell
+      about twenty-five pixels for text and an amount needs forty — the pie legend's failure
+      exactly, and nothing that renders to a string can see it
+- [x] Verified: 138 backend tests, 225 render checks, 16 new end-to-end calendar checks
+      (`npm run calendar`) driving the real backend, the full cycle check, and the grid's
+      totals matched the day table's on every day tried
+
+## Layout rework
+
+- [x] Two columns from 1280px, split by how much width each panel needs rather than by how
+      important it is. Wide column: analysis, pie, calendar, day. Narrow column: trend,
+      expenses, categories
+- [x] The page widened from 896px to 1280px in the same change, because it had to be. Two
+      columns inside the old width would have given each about 416px — the exact width that
+      squeezed the pie legend to one letter per category
+- [x] The split starts at `xl` and not `lg`. At 1024px the wide column is 587px inside its
+      padding and the calendar grid needs 640px, so the grid would have started scrolling
+      sideways at exactly the window width where it gained a second column — Session 11 again,
+      in a feature two hours old. Caught in the arithmetic, before it was written
+- [x] Spacing cut by about a third: sections 40px → 24px, card padding 24px → 20px, page
+      padding 56px → 32px, corners 16px → 12px, calendar cells 64px → 56px. Roughly halves the
+      page's height
+- [x] Card chrome moved into one shared constant. It had been the same class string copied into
+      seven components
+- [x] A real reversal of the "light, clean, generous spacing" decision, recorded as one in the
+      decisions table rather than applied quietly
+- [x] Verified: the pie card goes from 368px inside its padding to 765px, so the legend now sits
+      *beside* the chart rather than under it. It gets wider, not narrower — which is the whole
+      point of widening the page at the same time as splitting it
+
+## Collapsible panels
+
+- [x] Four panels fold: analysis, day, expenses, categories. Only categories starts folded
+- [x] The rule: a panel starts closed only if it is a tool you go looking for, never if it is
+      information you would read. A first-time visitor lands on one closed strip, not a page of
+      shut boxes
+- [x] The charts and the calendar do not fold at all. A chart's whole value is being read
+      without being asked for
+- [x] The analysis card's header was split from its body, so the period dropdown stays visible
+      when the card is folded. It governs every number on the page; a global control that hides
+      itself is a bad control
+- [x] A folded panel keeps its heading and a summary of what is inside — "Expenses · 92
+      expenses". A closed box is a labelled strip, never a blank one
+- [x] Clicking a date in the calendar force-opens the day panel. The calendar is the only way to
+      reach a day, so a click that appears to do nothing is the feature appearing to do nothing
+- [x] The folded state persists in `localStorage`, per browser, never reaching the server. Read
+      back through Zod, because it is a boundary like any other — anything that does not parse
+      falls back to the defaults rather than throwing
+- [x] Unknown panel ids are filtered out rather than rejecting the whole list, so renaming a
+      panel later forgets one line of somebody's layout instead of resetting it
+- [x] Found while verifying: three new checks passed for the wrong reason — one searched the
+      whole page for the word "hidden" and found it in `aria-hidden`, one counted every button
+      with `aria-expanded` and found the pie legend's rows, and one asked whether *some* panel
+      was open where it meant *this* one. Panels now carry a `data-panel` id so a check can name
+      what it is asking about
+- [x] The jsdom harness the end-to-end checks share was extracted rather than copied a third
+      time (`check-harness.tsx`). `cycle-check` keeps its own copy, which wraps fetch for its
+      own bookkeeping
+- [x] Verified: 138 backend tests, 250 render checks, 31 new panel checks (`npm run panels`,
+      including a full unmount and remount to prove persistence survives a reload), 16 calendar
+      checks, the cycle check, and a production build
+
+## Dates the parser can read
+
+- [x] Month names, English and Finnish, full and abbreviated, in either order, with or without
+      a year: "sept 4", "4 sept", "September 4th", "4 September 2026", "4. syyskuuta",
+      "syyskuun 4.". English ordinals (1st, 2nd, 3rd, 4th) and the Finnish trailing dot
+- [x] Finnish months are generated from one stem each plus the endings a date uses — *syys*,
+      *syyskuu*, *syyskuuta*, *syyskuussa*, *syyskuun* — rather than sixty hand-written entries
+- [x] Spellings without the umlaut (*kesakuuta*, *heinakuuta*) accepted, because a phone
+      keyboard set to English does not give you ä
+- [x] The alternation is sorted longest name first. `mar` is March and `marras` is November,
+      and the short one listed first would have read November as March
+- [x] A day and month with no year means the most recent occurrence on or before today. "sept 4"
+      is last September in August, and this September in October. Walking back a year at a time
+      makes "29 february" land on the most recent leap year without any special case
+- [x] A year that was actually written is taken at its word. "4 September 2026" typed in August
+      is reported as being in the future rather than quietly moved to 2025
+
+## An unreadable date is visible, not silent
+
+- [x] The reported bug: "sept 4" was not recognised, so the parser used today. Nothing looked
+      wrong on the confirm step, which is exactly why it would be missed
+- [x] `findDate` now has three outcomes rather than two — found, unreadable, none. The old
+      boolean meant both "no date mentioned" and "a date I could not read", and collapsing
+      those two *is* the bug
+- [x] An unreadable date returns `expenseDate: null` and a `dateNote` quoting the text that
+      failed: "“31 february” is not a real date", "“4 september 2027” is in the future",
+      "“september” names a month but not a day"
+- [x] The confirm step leaves the date box empty, rings it red, marks it `aria-invalid`, puts
+      the cursor in it, shows the note as an error rather than a hint, and refuses to save —
+      the same treatment a missing amount has always had, for the same reason
+- [x] A sentence with no date in it still gets today, quietly. That case is ordinary and
+      demanding a date every time would be unusable
+- [x] A date that could not be read *lowers* confidence rather than leaving it unchanged:
+      something was said and not understood, which is worse than nothing being said
+- [x] "may" is excluded from bare month detection — it is a common English verb — but still
+      works with a day beside it
+- [x] "45,99,26" is still read as a number, not as a broken date. Only a date-shaped triple
+      that fails on the calendar is worth reporting
+- [x] The model prompt and its response schema updated to match, so a real provider has the
+      same three outcomes available. Unverified against a live provider, like the rest of those
+      adapters
+- [x] Verified: 183 backend tests (45 new, covering 30 written forms, the year rule, the leap
+      year, every unreadable case and the confidence change), 263 render checks including the
+      confirm step's flagged empty date, and the reported sentence end to end through the real
+      API
+
+## The merchant is what survives
+
+- [x] "32 euro netflix sept 5" found no merchant. The step only knew four shapes a name could
+      take, and a name between the amount and the date with nothing marking it fits none of them
+- [x] Same shape as the query box bug: a whitelist of phrasings is only as complete as whoever
+      wrote it, and it fails silently. Inverted rather than extended — the amount, currency and
+      date are removed, the words that say what was bought are known, and what survives is the
+      name
+- [x] The category table split into `items` (common nouns — what was bought) and `brands`
+      (proper names — what was bought *and* where). One list could only refuse both, which is
+      exactly why a lowercase "netflix" produced nothing
+- [x] The preposition now splits rather than gates: before it is what was bought, after it is
+      where. "coffee and tea at k market" needs no guessing; its absence is no longer fatal
+- [x] With no preposition, the leading two leftover words are the name, stopping at any item
+      word. A brand ends the name immediately — "89 eur ikea shelves" is Ikea
+- [x] A single leftover word is a name if it is a brand or capitalised. The capital-letter rule
+      no longer skips the first word: asking whether a word names a thing is a better question
+      than asking where it sits, and it catches "20 euro Kotipizza" which the positional rule
+      missed
+- [x] Left ambiguous on purpose: a lone unknown lowercase word. "5 constructor" and
+      "4 eur pastry" get no merchant, because guessing would produce one that looks as
+      deliberate as a correct one
+- [x] `description` still holds the whole sentence as typed. The split decides what is promoted
+      to a name; nothing is thrown away
+- [x] Checked for regressions: every sentence in the existing suite still parses the same way,
+      including "coffee at euro shop 4,50", "spent 12 eur at 7 eleven", "paid 30 at monday
+      market on 30.08.26" and the three that must return no merchant at all
+- [x] Verified: 198 backend tests (15 new across both shapes), 263 render checks, and the
+      reported sentence end to end through the real API
+
+## Receipt scanning
+
+- [x] Reversed a recorded decision. Receipt photos were out of scope in `CLAUDE.md`,
+      `build-plan.md` and the README, rejected for needing uploads and image storage. Browser
+      OCR leaves neither true, so the premises expired rather than the decision being overruled
+- [x] `ReceiptExtractor` interface with one method, so a vision model can be a second
+      implementation later without anything downstream changing
+- [x] `TesseractReceiptExtractor`: WebAssembly OCR in the browser, dynamically imported so
+      several megabytes stay out of the first paint. The image never leaves the device
+- [x] A dedicated normalizer on the server — never the sentence parser. It borrows `readNumber`,
+      `isRealDate`, `mostRecentOccurrence` and the English/Finnish month table rather than
+      growing a second definition of any of them
+- [x] `POST /api/receipts/read` takes lines of text, returns a receipt and a suggestion, saves
+      nothing. No multipart, no upload, no storage — so it works unchanged on the serverless
+      deployment that has no filesystem
+- [x] Damaged keywords are undone rather than enumerated: fold `0`→`o`, `1`→`l`, `5`→`s`, drop
+      accents, allow slack scaled to word length. Covers TOTAL, T0TAL, TOTAI, Totai, YHTEENSÄ,
+      YHTEENSA, SUMMA and spellings nobody has seen yet
+- [x] European amounts and dates, space-grouped thousands included, and every field returns null
+      rather than a guess
+
+## The total is checked, not trusted
+
+- [x] Three cross-checks, none of which depends on how confident the OCR felt: the lines add up,
+      the VAT is a known Finnish rate of the total, the card line repeats it
+- [x] Four verdicts — corroborated, unverified, contradicted, absent — each with its own
+      treatment on screen
+- [x] A contradicted total arrives as an **empty amount box**, not a red-tinted filled-in one. A
+      filled-in field gets approved at a glance whatever colour it is
+- [x] Both readings offered as one-click choices, neither preselected. Dividing by a hundred and
+      re-running the checks usually identifies the right answer outright
+- [x] "Unverified" is visually distinct from "checked" — amber, the project's only third colour,
+      because "we read a number" is not "we checked a number"
+- [x] The photo sits beside the fields with the total, date and shop boxed on it, using the word
+      positions OCR returned. Boxes are positioned elements rather than a canvas, so the checks
+      can see them
+- [x] Every failure has its own message and a way forward: wrong file type, too large, engine
+      would not start, no text found, no total detected, anything else
+- [x] Found while verifying: an address line was being counted as an item, contradicting a
+      correct total. Fixed with a rule rather than an exclusion list — an item's amount must
+      carry cents
+- [x] Found by writing a test: "TOTAL" on one line and "24,90 €" on the next came back as no
+      total at all. A narrow receipt or an angled photo wraps the value, and the reader only
+      looked at the keyword line. It now reads the line below when that line is an amount and
+      nothing else — never when it is a purchase, or a bare "YHTEENSA" above "Maito 1,29" would
+      hand back the price of the milk
+- [x] Found while verifying: two of the new render checks proved nothing. One matched
+      `placeholder="0.00"` and so passed on the input merely existing. Both now read the amount
+      box's own tag, the way the date checks already did
+- [x] Assets self-hosted: 14 MB measured, not estimated — core 3.9 MB twice (SIMD and fallback),
+      English 2.0 MB, Finnish 3.8 MB, worker 0.1 MB
+- [x] Verified: 287 backend tests (89 new across the normalizer and the checks), 290 render
+      checks, every verdict exercised end to end through the real API, the Tesseract data shape
+      confirmed by running the engine against a real image, and all five self-hosted assets
+      served at the paths the extractor asks for
+- [ ] **Not verified: the browser path itself.** jsdom has no Worker, no canvas and no File, and
+      the check harness rewrites every URL to the backend, so the engine load, the camera capture
+      and the overlay are eye-only. Needs a real phone and a real receipt
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

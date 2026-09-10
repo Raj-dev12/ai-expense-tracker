@@ -9,6 +9,7 @@ import {
   deleteExpense,
   getCategories,
   getCategoryList,
+  getDailyTotals,
   getMonthlySummary,
   getSettings,
   getSummary,
@@ -19,9 +20,11 @@ import {
   updateExpense,
   type Category,
   type CategoryBreakdown,
+  type DailyTotal,
   type DeleteMode,
   type Expense,
   type ExpensePatch,
+  type ExpenseSource,
   type AskAnswer,
   type MonthlySummary as MonthlySummaryResponse,
   type NewExpense,
@@ -37,7 +40,13 @@ import {
   windowForSelection,
   type Selection,
 } from "./periods";
+import { monthWindow, startOfMonth } from "./calendar";
+import { readCollapsed, writeCollapsed, type PanelId } from "./panels";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
+import { Calendar } from "./components/Calendar";
+import { ReceiptScanner } from "./components/ReceiptScanner";
+import { ReceiptReview } from "./components/ReceiptReview";
+import type { ReceiptReading } from "./receipts/extractor";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
 import { CategoryPie, type PieSlice } from "./components/CategoryPie";
@@ -82,6 +91,17 @@ export default function App() {
    * treat each parse as a new component, which resets the fields.
    */
   const [reviewId, setReviewId] = useState(0);
+
+  /**
+   * A photographed receipt, once it has been read.
+   *
+   * Held beside `review` rather than folded into it, because the two confirm
+   * steps are genuinely different screens: one is checking a sentence you wrote,
+   * the other is checking a photo you may not have read. Only one is ever open,
+   * which `startScan` and `handleParse` enforce by clearing the other.
+   */
+  const [scan, setScan] = useState<ReceiptReading | null>(null);
+  const [scanId, setScanId] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState<Expense | null>(null);
 
@@ -203,6 +223,70 @@ export default function App() {
   const [day, setDay] = useState(todayIso);
   const [dayExpenses, setDayExpenses] = useState<Expense[]>([]);
   const [dayLoading, setDayLoading] = useState(true);
+
+  /**
+   * The calendar: which month it is showing, and what each of its days came to.
+   *
+   * The month is its own state, deliberately not derived from `selection`. The
+   * calendar's arrows and the period stepper are two controls doing two jobs,
+   * and tying them together would mean choosing a day in September silently
+   * moved the dashboard off the July somebody was reading.
+   *
+   * The consequence, which is intended rather than tolerated: the calendar can
+   * show a different month from the rest of the page, so it names its month in
+   * its own heading.
+   */
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(todayIso()));
+  const [dailyTotals, setDailyTotals] = useState<DailyTotal[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+
+  /**
+   * Today, held once rather than recomputed in the components that need it.
+   *
+   * The calendar rings today and stops its forward arrow there, and both have to
+   * mean the same date. Calling `todayIso()` in two places would almost always
+   * agree and would disagree exactly once, at midnight, which is the worst kind
+   * of bug to be told about.
+   */
+  const [today] = useState(todayIso);
+
+  /**
+   * Which panels are folded away, read from the browser on first render.
+   *
+   * `useState` is given the function rather than its result, so the stored value
+   * is read once when the page first appears instead of on every render.
+   *
+   * Written back on each toggle rather than in an effect. An effect would also
+   * run on the first render, which would quietly write the defaults into storage
+   * for somebody who has never touched a panel — and then a later change to
+   * which panels start closed would never reach them.
+   */
+  const [collapsed, setCollapsed] = useState<Set<PanelId>>(readCollapsed);
+
+  function togglePanel(id: PanelId) {
+    const next = new Set(collapsed);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setCollapsed(next);
+    writeCollapsed(next);
+  }
+
+  /**
+   * Choosing a date in the calendar, which also opens the day panel.
+   *
+   * The panel can be folded away, and a click that produces no visible change
+   * reads as broken — the calendar is the only way to reach a day now, so a
+   * click that appears to do nothing is the feature appearing to do nothing.
+   */
+  function handleSelectDay(date: string) {
+    setDay(date);
+    if (!collapsed.has("day")) return;
+
+    const next = new Set(collapsed);
+    next.delete("day");
+    setCollapsed(next);
+    writeCollapsed(next);
+  }
   /**
    * Bumped whenever anything is written, so the day view refetches without the
    * dashboard's refresh needing to know which day is on screen. The alternative
@@ -319,6 +403,38 @@ export default function App() {
     };
   }, [day, writes]);
 
+  /**
+   * The calendar's daily totals, refetched when its month changes or anything
+   * is written.
+   *
+   * Separate from the day view's fetch for the same reason that one is separate
+   * from the dashboard's: it answers a different question and changes for a
+   * different reason. Stepping to another month should not refetch the charts,
+   * and picking a day should not refetch the grid — the month's totals did not
+   * move because you looked at one of its days.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    setCalendarLoading(true);
+
+    getDailyTotals(monthWindow(calendarMonth, today))
+      .then((result) => {
+        // Stepping months quickly can land the replies out of order, and the
+        // slower one would draw the wrong month's numbers into the grid.
+        if (!cancelled) setDailyTotals(result.days);
+      })
+      .catch(() => {
+        if (!cancelled) setDailyTotals([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCalendarLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [calendarMonth, today, writes]);
+
   async function handleParse(event: React.FormEvent) {
     event.preventDefault();
     if (!sentence.trim() || parsing) return;
@@ -326,6 +442,7 @@ export default function App() {
     setParsing(true);
     setError(null);
     setJustSaved(null);
+    discardScan();
 
     try {
       // This asks what the sentence means. It saves nothing — the response
@@ -339,17 +456,19 @@ export default function App() {
     }
   }
 
-  async function handleSave(expense: NewExpense) {
+  async function handleSave(expense: NewExpense, source: ExpenseSource = "web") {
     setSaving(true);
     setError(null);
 
     try {
       // The only call on this page that writes anything, and it only happens
-      // because a person pressed the button.
-      const saved = await createExpense(expense);
+      // because a person pressed the button. A scanned receipt takes the same
+      // door as a typed sentence — it only says so, so the list can show where
+      // the row came from.
+      const saved = await createExpense(expense, source);
       setJustSaved(saved);
       setReview(null);
-      setSentence("");
+      if (source === "web") setSentence("");
       // The summary described the totals as they were a moment ago. Leaving it
       // on screen next to freshly changed cards would have the page stating two
       // different numbers for the same month, so it is cleared rather than
@@ -370,6 +489,36 @@ export default function App() {
   function handleDiscard() {
     setReview(null);
     setError(null);
+  }
+
+  /**
+   * A receipt has been read. Show it, and put the typed suggestion away.
+   *
+   * Two confirm steps on screen at once would be two half-finished expenses
+   * competing for one save button.
+   */
+  function handleScanned(reading: ReceiptReading) {
+    setReview(null);
+    setError(null);
+    setJustSaved(null);
+    setScan(reading);
+    setScanId((count) => count + 1);
+  }
+
+  /**
+   * Let go of the photo.
+   *
+   * An object URL keeps the image alive in memory until it is revoked, and a
+   * page somebody scans ten receipts on would otherwise hold all ten.
+   */
+  function discardScan() {
+    if (scan) URL.revokeObjectURL(scan.imageUrl);
+    setScan(null);
+  }
+
+  async function handleSaveScan(expense: NewExpense) {
+    await handleSave(expense, "receipt");
+    discardScan();
   }
 
   function handleEdit(id: string) {
@@ -587,7 +736,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <main className="mx-auto max-w-4xl space-y-10 px-6 py-14">
+      {/*
+        1280px wide, not 896px, and the width is a precondition of the columns
+        rather than a preference. Two columns inside the old width would have
+        given each about 416px — precisely the width that squeezed the pie
+        legend to one letter per category. See the decisions table.
+      */}
+      <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold tracking-tight">Expense tracker</h1>
@@ -614,13 +769,18 @@ export default function App() {
               className="w-full rounded-xl bg-white px-5 py-4 text-slate-900 ring-1 ring-slate-200 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-accent"
             />
 
-            <button
-              type="submit"
-              disabled={!sentence.trim() || parsing}
-              className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {parsing ? "Reading..." : "Read this"}
-            </button>
+            <div className="flex flex-wrap items-start gap-3">
+              <button
+                type="submit"
+                disabled={!sentence.trim() || parsing}
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {parsing ? "Reading..." : "Read this"}
+              </button>
+
+              {/* Or photograph one instead. The reading happens on this device. */}
+              <ReceiptScanner busy={parsing || saving} onRead={handleScanned} />
+            </div>
           </form>
 
           {error && (
@@ -635,8 +795,27 @@ export default function App() {
           )}
         </section>
 
+        {scan && (
+          <section className="rounded-xl bg-slate-100/70 p-5">
+            <ReceiptReview
+              key={scanId}
+              receipt={scan.receipt}
+              suggestion={scan.suggestion}
+              words={scan.words}
+              imageUrl={scan.imageUrl}
+              imageWidth={scan.imageWidth}
+              imageHeight={scan.imageHeight}
+              saving={saving}
+              showCurrency={conversionEnabled}
+              categories={categoryList.map((category) => category.name)}
+              onSave={handleSaveScan}
+              onDiscard={discardScan}
+            />
+          </section>
+        )}
+
         {review && (
-          <section className="rounded-2xl bg-slate-100/70 p-6">
+          <section className="rounded-xl bg-slate-100/70 p-5">
             <SuggestionReview
               key={reviewId}
               suggestion={review.suggestion}
@@ -659,70 +838,116 @@ export default function App() {
               <SummaryCards summary={summary} currency={currency} phrase={selectionPhrase(selection)} />
             )}
 
-            {summary && (
-              <AnalysisCard
-                selection={selection}
-                onSelectionChange={handlePeriodChange}
-                summary={monthly}
-                writtenAt={monthlyAt}
-                loading={monthlyLoading}
-                error={monthlyError}
-                onRequest={handleSummarise}
-                answer={answer}
-                asking={asking}
-                askError={askError}
-                onAsk={handleAsk}
-              />
-            )}
+            {/*
+              Two columns from 1280px, split by how much width each panel needs
+              rather than by how important it is.
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              {categories && (
-                <CategoryPie
-                  categories={categories.categories}
-                  from={categories.from}
+              The calendar grid needs 640px before it starts scrolling sideways,
+              and the pie wants 576px before its legend can sit beside the chart;
+              the trend line, the expense rows and the category list all read
+              perfectly well at 400px. So those three go left and the rest go
+              right. Three columns with the left one spanning two is how 2fr/1fr
+              is written in Tailwind without reaching for a bracket.
+
+              1280px is also why this is `xl:` rather than `lg:`. At 1024px the
+              wide column would be 587px inside its padding — under the
+              calendar's 640px floor — so the grid would have begun scrolling
+              sideways at exactly the window width where it gained a second
+              column. A card getting narrower as the window gets wider is the bug
+              that took the pie legend down to one letter per category, and it
+              very nearly happened here a second time.
+
+              `min-w-0` on both columns because a grid item defaults to refusing
+              to shrink below its own contents, which would let the calendar's
+              minimum width push its column past its share of the row.
+            */}
+            <div className="grid gap-6 xl:grid-cols-3 xl:items-start">
+              <div className="min-w-0 space-y-6 xl:col-span-2">
+                {summary && (
+                  <AnalysisCard
+                    selection={selection}
+                    onSelectionChange={handlePeriodChange}
+                    summary={monthly}
+                    writtenAt={monthlyAt}
+                    loading={monthlyLoading}
+                    error={monthlyError}
+                    onRequest={handleSummarise}
+                    answer={answer}
+                    asking={asking}
+                    askError={askError}
+                    onAsk={handleAsk}
+                    open={!collapsed.has("analysis")}
+                    onToggle={() => togglePanel("analysis")}
+                  />
+                )}
+
+                {categories && (
+                  <CategoryPie
+                    categories={categories.categories}
+                    from={categories.from}
+                    currency={currency}
+                    selected={pieSlice}
+                    selectedExpenses={pieExpenses}
+                    selectedLoading={pieLoading}
+                    onSelect={setPieSlice}
+                    onDismiss={dismissPieCategory}
+                  />
+                )}
+
+                <Calendar
+                  month={calendarMonth}
+                  days={dailyTotals}
+                  selected={day}
+                  today={today}
                   currency={currency}
-                  selected={pieSlice}
-                  selectedExpenses={pieExpenses}
-                  selectedLoading={pieLoading}
-                  onSelect={setPieSlice}
-                  onDismiss={dismissPieCategory}
+                  loading={calendarLoading}
+                  onMonthChange={setCalendarMonth}
+                  onSelect={handleSelectDay}
                 />
-              )}
-              {trend && <TrendChart points={trend.points} currency={currency} />}
+
+                <DayView
+                  date={day}
+                  expenses={dayExpenses}
+                  currency={currency}
+                  loading={dayLoading}
+                  open={!collapsed.has("day")}
+                  onToggle={() => togglePanel("day")}
+                />
+              </div>
+
+              <div className="min-w-0 space-y-6">
+                {trend && <TrendChart points={trend.points} currency={currency} />}
+
+                <RecentExpenses
+                  expenses={recent}
+                  total={total}
+                  currency={currency}
+                  showCurrency={conversionEnabled}
+                  editingId={editingId}
+                  savingEdit={savingEdit}
+                  editError={editError}
+                  onEdit={handleEdit}
+                  onCancelEdit={handleCancelEdit}
+                  onSaveEdit={handleSaveEdit}
+                  categories={categoryList.map((category) => category.name)}
+                  onDelete={handleDeleteExpense}
+                  open={!collapsed.has("recent")}
+                  onToggle={() => togglePanel("recent")}
+                />
+
+                <CategoryManager
+                  categories={categoryList}
+                  uncategorised={UNCATEGORISED}
+                  busy={categoryBusy}
+                  error={categoryError}
+                  onAdd={handleAddCategory}
+                  onRename={handleRenameCategory}
+                  onDelete={handleDeleteCategory}
+                  open={!collapsed.has("categories")}
+                  onToggle={() => togglePanel("categories")}
+                />
+              </div>
             </div>
-
-            <DayView
-              date={day}
-              expenses={dayExpenses}
-              currency={currency}
-              loading={dayLoading}
-              onDateChange={setDay}
-            />
-
-            <RecentExpenses
-              expenses={recent}
-              total={total}
-              currency={currency}
-              showCurrency={conversionEnabled}
-              editingId={editingId}
-              savingEdit={savingEdit}
-              editError={editError}
-              onEdit={handleEdit}
-              onCancelEdit={handleCancelEdit}
-              onSaveEdit={handleSaveEdit}
-              categories={categoryList.map((category) => category.name)}
-              onDelete={handleDeleteExpense}
-            />
-
-            <CategoryManager
-              categories={categoryList}
-              uncategorised={UNCATEGORISED}
-              busy={categoryBusy}
-              error={categoryError}
-              onAdd={handleAddCategory}
-              onRename={handleRenameCategory}
-              onDelete={handleDeleteCategory}
-            />
           </>
         )}
       </main>

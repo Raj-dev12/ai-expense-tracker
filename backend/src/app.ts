@@ -4,6 +4,7 @@ import { aiRoutes } from "./routes/ai.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { expenseRoutes } from "./routes/expenses.js";
+import { receiptRoutes } from "./routes/receipts.js";
 import { healthRoutes } from "./routes/health.js";
 import { settingsRoutes } from "./routes/settings.js";
 
@@ -60,6 +61,7 @@ export function buildApp(): FastifyInstance {
   app.register(healthRoutes);
   app.register(expenseRoutes);
   app.register(aiRoutes);
+  app.register(receiptRoutes);
   app.register(analyticsRoutes);
   app.register(settingsRoutes);
   app.register(categoryRoutes);

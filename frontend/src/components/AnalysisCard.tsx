@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AskAnswer, MonthlySummary as Summary } from "../api";
 import { selectionLabel, selectionShortName, type Selection } from "../periods";
+import { CollapsiblePanel } from "./Panel";
 import { PeriodPicker } from "./PeriodPicker";
 
 /**
@@ -42,6 +43,8 @@ export function AnalysisCard({
   asking,
   askError,
   onAsk,
+  open,
+  onToggle,
 }: {
   /**
    * Which window the whole section describes.
@@ -70,28 +73,42 @@ export function AnalysisCard({
   asking: boolean;
   askError: string | null;
   onAsk: (question: string) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const [question, setQuestion] = useState("");
 
   return (
-    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <PeriodPicker selection={selection} onChange={onSelectionChange} />
-          <h2 className="text-base font-medium text-slate-900">
-            {selectionLabel(selection)} in words
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={onRequest}
-          disabled={loading}
-          className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {loading ? "Writing..." : summary ? "Write it again" : `Summarise ${selectionShortName(selection)}`}
-        </button>
-      </header>
+    /*
+      The period dropdown goes in `controls`, which stays visible when the body
+      is folded away. It governs the cards, both charts, the expenses list and
+      the written summary — every number on the page — so hiding it inside a
+      panel somebody has closed would put the page's main control behind a
+      disclosure triangle. A global control that hides itself is a bad control.
 
+      The Summarise button goes with it, because the two are read together: the
+      dropdown chooses the period and the button acts on it.
+    */
+    <CollapsiblePanel
+      id="analysis"
+      title={`${selectionLabel(selection)} in words`}
+      summary={summary ? "Written" : "Not written yet"}
+      open={open}
+      onToggle={onToggle}
+      controls={
+        <>
+          <PeriodPicker selection={selection} onChange={onSelectionChange} />
+          <button
+            type="button"
+            onClick={onRequest}
+            disabled={loading}
+            className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {loading ? "Writing..." : summary ? "Write it again" : `Summarise ${selectionShortName(selection)}`}
+          </button>
+        </>
+      }
+    >
       {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       {!summary && !error && (
@@ -174,6 +191,6 @@ export function AnalysisCard({
           </div>
         )}
       </form>
-    </section>
+    </CollapsiblePanel>
   );
 }

@@ -42,12 +42,24 @@ export function ExpenseFields({
   values,
   onChange,
   autoFocusAmount = false,
+  autoFocusDate = false,
+  flagDate = false,
   showCurrency = true,
   categories,
 }: {
   values: ExpenseFieldValues;
   onChange: (patch: Partial<ExpenseFieldValues>) => void;
   autoFocusAmount?: boolean;
+  /** Put the cursor in the date box, for when that is the field needing attention. */
+  autoFocusDate?: boolean;
+  /**
+   * Draw the date box as needing an answer rather than as merely empty.
+   *
+   * Used when the parser found something meant to be a date and could not read
+   * it. An empty box on its own reads as "nothing was said about this"; the
+   * point here is that something was said and not understood.
+   */
+  flagDate?: boolean;
   /**
    * Hidden when conversion is off, because then there is exactly one currency
    * and it is the base. A dropdown offering a choice that will be ignored is
@@ -121,10 +133,12 @@ export function ExpenseFields({
       <Chip label="Date">
         <input
           type="date"
-          className={fieldClass}
+          className={flagDate ? `${fieldClass} ring-2 ring-red-400` : fieldClass}
           value={values.expenseDate}
           max={new Date().toISOString().slice(0, 10)}
           onChange={(event) => onChange({ expenseDate: event.target.value })}
+          autoFocus={autoFocusDate}
+          aria-invalid={flagDate || undefined}
         />
       </Chip>
 

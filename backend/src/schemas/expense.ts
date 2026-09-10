@@ -76,8 +76,13 @@ export const categorySchema = z.string().trim().min(1, "Pick a category").max(40
  * `source` records where a row came from. The caller declares it, which is fine
  * here: with no login there is nothing to impersonate, and its only job is to
  * let the demo show that the MCP server really did write this row.
+ *
+ * "receipt" joined the list when scanning arrived. It needed no migration — the
+ * column is varchar(10) — and it earns its place because the day view already
+ * prints "added by {source}", so a scanned expense says where it came from
+ * without any new plumbing.
  */
-export const sourceSchema = z.enum(["web", "mcp", "seed"]);
+export const sourceSchema = z.enum(["web", "mcp", "seed", "receipt"]);
 
 const amountSchema = z
   .number()

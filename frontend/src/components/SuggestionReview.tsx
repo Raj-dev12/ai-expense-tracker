@@ -43,11 +43,24 @@ export function SuggestionReview({
     currency: suggestion.currency,
     merchant: suggestion.merchant ?? "",
     category: suggestion.category,
-    expenseDate: suggestion.expenseDate,
+    // Empty when the parser could not read a date it was clearly given. An
+    // empty box is the point: it cannot be scanned past the way a plausible
+    // wrong date can.
+    expenseDate: suggestion.expenseDate ?? "",
     note: suggestion.description ?? "",
   });
 
-  const usable = amountIsUsable(values.amount);
+  const amountUsable = amountIsUsable(values.amount);
+  /**
+   * A date has to be present before this can be saved.
+   *
+   * The same rule the amount has followed since the beginning, applied to the
+   * date for the same reason. It only ever bites when the parser handed back
+   * nothing: a sentence with no date in it gets today, which is a real value and
+   * passes this immediately.
+   */
+  const dateUsable = values.expenseDate !== "";
+  const usable = amountUsable && dateUsable;
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -76,11 +89,34 @@ export function SuggestionReview({
         values={values}
         onChange={(patch) => setValues((current) => ({ ...current, ...patch }))}
         autoFocusAmount={suggestion.amount === null}
+        // The cursor goes to the date only when the amount does not need it
+        // first. Two fields cannot both be focused, and the amount is the one
+        // without which nothing can be saved at all.
+        autoFocusDate={suggestion.amount !== null && suggestion.expenseDate === null}
+        flagDate={suggestion.expenseDate === null && values.expenseDate === ""}
         showCurrency={showCurrency}
         categories={categories}
       />
 
-      {!usable && (
+      {/*
+        The date problem is stated separately from the amount one, and in
+        stronger terms, because it is a different kind of failure.
+
+        A missing amount is the parser finding nothing. A missing date is the
+        parser finding something and not understanding it, which means the
+        sentence contains a date this screen is not showing — so the note quotes
+        the text that failed rather than saying something general. Falling back to
+        today here would have put a plausible wrong date in the box, and a wrong
+        date that looks deliberate is exactly what a person scanning a screen full
+        of sensible values does not catch.
+      */}
+      {suggestion.dateNote && (
+        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {suggestion.dateNote} Pick the right one before saving.
+        </p>
+      )}
+
+      {!amountUsable && (
         <p className="text-sm text-slate-500">
           {suggestion.amount === null
             ? "No amount was found in that sentence. Add one to save it."

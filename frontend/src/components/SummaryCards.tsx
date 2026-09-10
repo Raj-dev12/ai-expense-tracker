@@ -19,7 +19,7 @@ function Card({
   note?: string;
 }) {
   return (
-    <div className="rounded-2xl bg-white px-5 py-4 ring-1 ring-slate-200">
+    <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200">
       <p className="text-xs font-medium text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{value}</p>
       {note && <p className="mt-1 text-xs text-slate-400">{note}</p>}

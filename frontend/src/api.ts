@@ -33,7 +33,12 @@ const suggestionSchema = z.object({
   // naming one this bundle has never heard of is correct rather than corrupt.
   category: z.string(),
   description: z.string().nullable(),
-  expenseDate: z.string(),
+  // Null when the parser found something meant to be a date and could not read
+  // it — not when the sentence named no date, which comes back as today. The
+  // confirm step leaves the box empty and will not save until it is filled in.
+  expenseDate: z.string().nullable(),
+  /** Why there is no date, quoting the text that failed. Null when there is one. */
+  dateNote: z.string().nullable(),
 });
 
 const parseResponseSchema = z.object({
@@ -164,10 +169,22 @@ export type NewExpense = {
 };
 
 /** Save a confirmed expense. This is the only call that writes anything. */
-export function createExpense(expense: NewExpense): Promise<Expense> {
+/**
+ * Where a row the browser creates came from.
+ *
+ * Only these two: a sentence somebody typed, or a receipt they photographed. The
+ * other values the server accepts belong to the MCP server and the seed script,
+ * and this page has no business claiming either.
+ */
+export type ExpenseSource = "web" | "receipt";
+
+export function createExpense(
+  expense: NewExpense,
+  source: ExpenseSource = "web",
+): Promise<Expense> {
   return request("/api/expenses", expenseSchema, {
     method: "POST",
-    body: JSON.stringify({ ...expense, source: "web" }),
+    body: JSON.stringify({ ...expense, source }),
   });
 }
 
@@ -342,6 +359,19 @@ const categoryBreakdownSchema = z.object({
   ),
 });
 
+/**
+ * One total per day that has spending, for the calendar grid.
+ *
+ * Days with nothing in them are simply absent, so the grid fills its own gaps.
+ * Totals arrive as strings like every other amount, and stay strings until they
+ * are formatted — the browser never adds them up.
+ */
+const dailyTotalsSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  days: z.array(z.object({ date: z.string(), totalBase: z.string(), count: z.number() })),
+});
+
 const trendSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -354,6 +384,8 @@ const trendSchema = z.object({
 export type Summary = z.infer<typeof summarySchema>;
 export type CategoryBreakdown = z.infer<typeof categoryBreakdownSchema>;
 export type Trend = z.infer<typeof trendSchema>;
+export type DailyTotals = z.infer<typeof dailyTotalsSchema>;
+export type DailyTotal = DailyTotals["days"][number];
 export type CategorySlice = CategoryBreakdown["categories"][number];
 export type TrendPoint = Trend["points"][number];
 
@@ -372,6 +404,71 @@ export function getSummary(window?: Window): Promise<Summary> {
 export function getCategories(window?: Window): Promise<CategoryBreakdown> {
   const query = window ? `?from=${window.from}&to=${window.to}` : "";
   return request(`/api/analytics/categories${query}`, categoryBreakdownSchema);
+}
+
+// --- receipts ----------------------------------------------------------------
+
+/**
+ * What the reader made of a photographed receipt.
+ *
+ * The verdict is the important half. It is a union rather than a score because
+ * the interface has to *act* differently on each case, and a number would leave
+ * that decision to whoever read it. See the note on ReceiptReview.
+ */
+const totalVerdictSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("corroborated"), total: z.number(), by: z.string() }),
+  z.object({ kind: z.literal("unverified"), total: z.number(), why: z.string() }),
+  z.object({
+    kind: z.literal("contradicted"),
+    read: z.number(),
+    suggested: z.number().nullable(),
+    problem: z.string(),
+  }),
+  z.object({ kind: z.literal("absent"), why: z.string() }),
+]);
+
+const receiptDataSchema = z.object({
+  merchant: z.string().nullable(),
+  date: z.string().nullable(),
+  total: z.number().nullable(),
+  currency: z.string(),
+  vat: z.number().nullable(),
+  items: z.array(z.object({ description: z.string().nullable(), amount: z.number() })),
+  /** The exact text each value was read from, so the photo can be marked up. */
+  sources: z.object({
+    merchant: z.string().nullable(),
+    date: z.string().nullable(),
+    total: z.string().nullable(),
+  }),
+  verdict: totalVerdictSchema,
+  confidence: z.number(),
+});
+
+const readReceiptResponseSchema = z.object({
+  // The same promise the parse endpoint makes, asserted the same way.
+  saved: z.literal(false),
+  receipt: receiptDataSchema,
+  // The same shape a parsed sentence produces, so the confirm step can use the
+  // fields it already has rather than a second set that means the same thing.
+  suggestion: suggestionSchema,
+});
+
+export type TotalVerdict = z.infer<typeof totalVerdictSchema>;
+export type ReceiptData = z.infer<typeof receiptDataSchema>;
+export type ReadReceiptResponse = z.infer<typeof readReceiptResponseSchema>;
+
+/**
+ * Turn the text off a receipt into a suggested expense. Saves nothing.
+ *
+ * Only text is sent. The photo stays in the browser — it is never uploaded,
+ * never stored, and never reaches the server at all, which is what lets this
+ * work on a deployment with no filesystem.
+ */
+export function readReceipt(lines: string[]): Promise<ReadReceiptResponse> {
+  return request("/api/receipts/read", readReceiptResponseSchema, {
+    method: "POST",
+    body: JSON.stringify({ lines }),
+  });
 }
 
 // --- settings ----------------------------------------------------------------
@@ -411,6 +508,18 @@ export function setBaseCurrency(baseCurrency: string): Promise<BaseCurrencyChang
 export function getTrend(window?: { from: string; to: string }): Promise<Trend> {
   const query = window ? `?from=${window.from}&to=${window.to}` : "";
   return request(`/api/analytics/trend${query}`, trendSchema);
+}
+
+/**
+ * The calendar's daily totals.
+ *
+ * The window is required rather than optional, unlike the pie's and the trend's.
+ * Those have a sensible default because they follow the dashboard's period; this
+ * one always describes a specific month the calendar is showing, and defaulting
+ * it would only make it possible to ask for the wrong one by accident.
+ */
+export function getDailyTotals(window: { from: string; to: string }): Promise<DailyTotals> {
+  return request(`/api/analytics/daily?from=${window.from}&to=${window.to}`, dailyTotalsSchema);
 }
 
 // --- the monthly summary -----------------------------------------------------

@@ -94,7 +94,7 @@ function iso(year: number, month: number, day: number): string {
  * Every block this file steps begins on the 1st, so working in whole months and
  * only then attaching a day avoids the question entirely.
  */
-function shiftMonths(year: number, month: number, delta: number): { year: number; month: number } {
+export function shiftMonths(year: number, month: number, delta: number): { year: number; month: number } {
   const total = year * 12 + (month - 1) + delta;
   // The modulo has to be made positive by hand: -1 % 12 is -1 in JavaScript,
   // which would put December in month zero of the wrong year.
@@ -106,7 +106,7 @@ function lastDayOfMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-function addDays(date: string, days: number): string {
+export function addDays(date: string, days: number): string {
   const { year, month, day } = parts(date);
   const at = new Date(Date.UTC(year, month - 1, day));
   at.setUTCDate(at.getUTCDate() + days);
@@ -121,7 +121,7 @@ function addDays(date: string, days: number): string {
  * on Sunday here would put the same expense in a different bucket from the one
  * the chart draws it in.
  */
-function startOfWeek(date: string): string {
+export function startOfWeek(date: string): string {
   const { year, month, day } = parts(date);
   const at = new Date(Date.UTC(year, month - 1, day));
   // getUTCDay is 0 for Sunday, so Sunday goes back six days rather than none.

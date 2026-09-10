@@ -2,10 +2,23 @@ import { and, count, eq, gte, lte, sql, sum } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client.js";
 import { expenses } from "../db/schema.js";
-import { addDays, startOfMonth, startOfWeek, todayIso, weekStartsBetween } from "../lib/dates.js";
+import {
+  addDays,
+  endOfMonth,
+  startOfMonth,
+  startOfWeek,
+  todayIso,
+  weekStartsBetween,
+} from "../lib/dates.js";
 // The queries behind these live in one module because the AI monthly summary
 // needs the same numbers. See lib/figures.ts.
-import { categoryTotalsBetween, money, monthToDate, periodFigures } from "../lib/figures.js";
+import {
+  categoryTotalsBetween,
+  dailyTotalsBetween,
+  money,
+  monthToDate,
+  periodFigures,
+} from "../lib/figures.js";
 import { getDemoUser } from "../lib/user.js";
 import { validate } from "../lib/validate.js";
 import { rangeQuerySchema, summaryQuerySchema } from "../schemas/analytics.js";
@@ -41,6 +54,31 @@ export const analyticsRoutes: FastifyPluginAsync = async (app) => {
     const from = query.from ?? startOfMonth(today);
 
     return { from, to, categories: await categoryTotalsBetween(userId, from, to) };
+  });
+
+  /**
+   * What the calendar grid draws: one total per day that has spending.
+   *
+   * The same shape of thing as the pie's endpoint, and deliberately so. The
+   * calendar has the same two halves the pie has — an aggregate to draw, and the
+   * rows behind whichever part of it you click. This is the aggregate half.
+   * Clicking a date needs nothing new: a day is a range whose ends match, so the
+   * table below the grid reads `GET /api/expenses` with `from` and `to` set to
+   * the same date, exactly as it always did.
+   *
+   * Defaults to the whole of the current calendar month rather than to today,
+   * because a grid showing September should have September's numbers in it, not
+   * only the ones up to the 9th.
+   */
+  app.get("/api/analytics/daily", async (request) => {
+    const query = validate(rangeQuerySchema, request.query, "filters");
+    const { id: userId } = await getDemoUser();
+
+    const today = todayIso();
+    const from = query.from ?? startOfMonth(today);
+    const to = query.to ?? endOfMonth(today);
+
+    return { from, to, days: await dailyTotalsBetween(userId, from, to) };
   });
 
   /**

@@ -26,7 +26,7 @@ in Docker, behind HTTPS.
 | Seed data | ~90 expenses across 3 months, loaded by a re-runnable script. |
 | Currency | Base EUR. Store original amount and converted amount. |
 | Address | Free `sslip.io` address, real HTTPS. |
-| Extra feature | AI monthly summary. No receipt photos. |
+| Extra feature | AI monthly summary. Receipt scanning added later — see the decisions table. |
 | AI safety | Confirm step. AI never writes to the database directly. |
 | Charts | Pie for categories, line for the trend. |
 | Pages | One scrolling page. No routing. |

@@ -9,12 +9,15 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "check": "node ../backend/node_modules/tsx/dist/cli.mjs src/render-check.tsx",
-    "cycle": "node ../backend/node_modules/tsx/dist/cli.mjs src/cycle-check.tsx"
+    "cycle": "node ../backend/node_modules/tsx/dist/cli.mjs src/cycle-check.tsx",
+    "calendar": "node ../backend/node_modules/tsx/dist/cli.mjs src/calendar-check.tsx",
+    "panels": "node ../backend/node_modules/tsx/dist/cli.mjs src/panels-check.tsx"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
+    "tesseract.js": "^7.0.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

@@ -257,6 +257,103 @@ for a whole session. Clipping is right for genuinely unbounded text, like a shop
 a person; it is wrong for a fixed vocabulary of nine known words, where not fitting means the
 layout is wrong and should be fixed rather than concealed.
 
+**CSS grid, and `grid-cols-7`**
+A way of laying out a page in rows and columns. You say how many columns there are and then
+hand it a list of things; it fills them left to right, wrapping to a new row when it runs out.
+The calendar is exactly this: `grid-cols-7` for the seven days of the week, then forty-two
+cells in one flat list, and the rows appear on their own. Nothing in the code says "this is
+the third week" — the shape comes entirely from the column count. That is also why the grid
+holds cells for the days either side of the month rather than leaving gaps: a list of
+forty-two things fills seven columns neatly, a list with holes in it does not.
+
+**`aria-label` and `aria-current`**
+Attributes that say what something *is* for anyone who is not looking at it — a screen reader,
+or in this project a check. A calendar cell shows the number "14"; its `aria-label` says
+"2026-09-14", which is the thing it actually means. `aria-current="date"` marks the one cell
+that is selected. They cost nothing, they make the page usable without sight, and they gave
+the calendar checks a reliable way to find a specific day: matching on visible text would have
+had to tell the 1st from the 11th and the 21st by eye.
+
+**Disclosure (a collapsible panel)**
+A panel whose contents can be folded away behind its own heading, leaving the heading
+visible. The rule this project applies: a panel starts *closed* only if it is a tool you go
+looking for, never if it is information you would read — otherwise a first-time visitor lands
+on a page of shut boxes and has to open them to find out what the app does. Only the category
+manager qualifies. A closed panel here still carries a one-line summary of what is inside, so
+it is a labelled strip rather than a blank one.
+
+**`localStorage`**
+A small store of text the browser keeps for one website, on one machine, that survives closing
+the tab. It holds strings only, so anything structured has to be turned into JSON on the way in
+and parsed on the way out. This project uses it for exactly one thing — which panels you have
+folded away — and for nothing else: it is per-browser, so it is the wrong place for anything
+that has to be true on your phone as well, and it never reaches the server. It is also a
+*boundary*, so what comes back out is validated with Zod like any other input. The value there
+may have been written by an older version of the code, or by hand with the developer tools
+open.
+
+**Aria attributes for state (`aria-expanded`)**
+`aria-expanded="false"` on a button says "the thing I control is currently folded away", which
+is what a screen reader announces instead of the triangle a sighted reader sees. It pairs with
+`aria-controls`, which names the element being folded. Worth knowing that this is state, not
+identity: a check that counts every button carrying `aria-expanded` will also find the pie
+legend, whose rows expand a panel of their own.
+
+**OCR (optical character recognition)**
+Turning a picture of text into text. It is guessing, pixel by pixel, and it fails in a way worth
+understanding: not by giving up, but by confidently producing a *different* character. `24,90`
+becomes `2490` when the comma is lost, or `21,90` when a 4 is read as a 1. Both are perfectly
+ordinary numbers, which is exactly what makes them dangerous.
+
+**WebAssembly (WASM)**
+A format that lets code written in other languages — here, the C++ of the Tesseract engine — run
+inside a browser at close to native speed. It is what makes text recognition possible on the
+device rather than on a server, which in turn is why the receipt feature needs no upload, no
+storage and no API key.
+
+**Bounding box**
+The rectangle a piece of recognised text occupied in the original image, as four numbers. The
+receipt screen uses them to draw a frame round the total on the photo, so you can see the pixels
+the number came from rather than taking the number on trust.
+
+**Cross-checking, versus confidence**
+A confidence score says how sure a process felt. A cross-check asks whether two independent
+statements agree. They are not substitutes: an OCR engine can be extremely confident about a
+character it got wrong, so its score cannot catch that error, while "these lines add up to
+something different from this total" catches it without knowing anything about pixels at all.
+A receipt is a redundant document, and redundancy is what makes checking possible.
+
+**Whitelist and complement**
+A whitelist enumerates the cases you accept: "a merchant appears after at, from, in or on".
+It is only ever as complete as the imagination of whoever wrote it, and the failure mode is
+silence — a sentence that fits none of the listed cases produces nothing, with no error. The
+complement inverts the question: identify everything that is *not* the thing, remove it, and
+take what survives. There is no list of phrasings to get around, because there is no list.
+This project has now made the same mistake twice — the query box only answering questions it
+had anticipated, and the merchant step only finding names it had anticipated — and fixed both
+the same way.
+
+**Partitive, and why Finnish months have several spellings**
+Finnish marks a word's job in a sentence by changing its ending rather than by putting a
+preposition in front of it. Every month is a compound ending in *kuu*, "moon" — *syyskuu* is
+September — and a written date uses the partitive, *syyskuuta*, which is roughly "of September".
+So one month has several forms the parser has to accept: *syys*, *syyskuu*, *syyskuuta*,
+*syyskuussa*, *syyskuun*. They are generated from one stem and a short list of endings rather
+than written out sixty times.
+
+**Longest-match-first in an alternation**
+A regular expression alternation like `a|ab` tries its branches left to right and stops at the
+first one that fits, so it can match the shorter option and leave the rest behind. In month
+names that is a real trap: `mar` is March and `marras` is November, and listing `mar` first
+would read the first three letters of "marras" and be seven months wrong. Sorting the
+alternatives longest-first removes the trap instead of documenting it.
+
+**Clamping**
+Pinning a value inside a range rather than letting it run past the end. The calendar asks the
+API for a month's totals, but the API refuses a date in the future — so for the current month
+it asks up to *today* instead of up to the 30th. Nothing is lost, because there is no spending
+in the future; the request simply stops where the data does.
+
 ---
 
 ## 5. Terms: the backend
@@ -1009,7 +1106,7 @@ want when someone asks you about the project in six months.
 | Decision | Choice | Why |
 |---|---|---|
 | Login | None — one built-in demo user | Auth is time-consuming and adds nothing to what this project is showing off. We still keep a `users` table with one row in it, so real logins can be added later without redesigning the database. |
-| Visual style | Light, clean, generous spacing | Financial software reads as trustworthy when it's restrained. Also easier to get right quickly than a dark theme, where getting contrast wrong is more obvious. |
+| Visual style | Light, clean, generous spacing | Financial software reads as trustworthy when it's restrained. Also easier to get right quickly than a dark theme, where getting contrast wrong is more obvious. **Held while the page had three sections on it. It carries ten now — see "Layout density revisited" below.** |
 | AI provider | Swappable, with an offline fake mode | Lets us build and test without spending money or waiting on a network. Anyone can clone the repo and run it with no API key. Removes the risk of a live demo failing because a third party is having a bad day. |
 | Starting data | ~90 invented expenses across 3 months | An empty app looks broken and gives the charts nothing to draw. Three months is the minimum that makes month-over-month comparison meaningful. |
 | Web address | Free automatic address (sslip.io) for now | Costs nothing, still gets a real HTTPS padlock, and avoids waiting hours for DNS to spread. Swapping to a purchased domain later is a one-line change in the Caddy config. |
@@ -1163,7 +1260,50 @@ want when someone asks you about the project in six months.
 | A custom range cannot be stepped | The arrows disappear | Stepping one would have to invent a stride — its own length? a month? — and every answer guesses at what somebody who typed two exact dates wanted next. |
 | The trend follows the period's end, not its length | Still fourteen weeks wide, but ending where the window ends | Both obvious answers are wrong: pinned to today it is the one chart on a July dashboard describing September, and squeezed into the period it draws "today" as a single point. Ending where the period ends keeps it a long-run chart while stopping it assuming that "now" is always today. This retires the "trend chart ignores the dropdown" entry rather than deepening it. |
 | The expenses list follows the period | `from` and `to`, like everything else | It asked for the most recent expenses regardless, which was invisible while every period ended today and plainly wrong the moment you could step back and read September's rows under a July dashboard. |
-| The day view stays independent | Its own date picker, unaffected by the arrows | It answers a different question — what was spent on one named day — and moving to another day deliberately does not refetch the charts. Coupling it would undo the reason it is separate. |
+| The day view stays independent | Chosen from the calendar, unaffected by the period arrows | It answers a different question — what was spent on one named day — and moving to another day deliberately does not refetch the charts. Coupling it would undo the reason it is separate. It used to carry a date picker of its own; the calendar replaced it, and the independence is unchanged. |
+| Daily totals come from an endpoint, not the browser | `GET /api/analytics/daily`, summed by PostgreSQL | Mirrors the pie exactly: an endpoint for the aggregate, plain `GET /api/expenses` for the rows behind whatever you click. Summing a month of expenses in the browser would work and would cost almost nothing — the objection is not weight. It is that the app would then hold two definitions of "what you spent", free to disagree, which is the whole reason `figures.ts` exists. And it could only be done by turning each decimal string into a JavaScript number, which is the float arithmetic the decimal column was chosen to avoid. `numeric` addition in the database is exact. |
+| Clicking a date needs no new endpoint | `GET /api/expenses?from=D&to=D` | A day is a range whose ends match. The day view already asked this way; only what sets the date changed. |
+| The calendar's month is its own | Not derived from the period stepper | Two controls doing two jobs. Tying them together would mean choosing a day in September silently moved the dashboard off the July somebody was reading. The cost is that the two can name different months, so the calendar writes its own month in its heading — otherwise the page looks like it is contradicting itself. Stepping the calendar leaves the chosen day where it is: a selected day is a thing somebody picked, not a cursor that follows the view. |
+| An empty day is blank, not `€0.00` | The date number, and nothing else | Twenty cells reading "€0.00" look like data and bury the days that have something in them; a blank cell says "nothing happened" faster than a zero does. It stays clickable, because checking that a quiet day really was quiet is a normal thing to do, and a cell that ignores a click reads as broken. |
+| Days either side of the month are drawn, faintly, and inert | Real dates, greyed, not buttons | A month rarely starts on a Monday, so the first row needs padding. Blank padding loses the grid's shape at the corners and makes you count to find the 1st. Clickable padding would mean the grid could take you into a month its own heading is not totalling, which then raises whether the heading should follow — a question with no good answer. |
+| The grid is always six rows | Even when five would fit | A month needs five or six depending on where it starts, and letting the count follow the month makes the card change height every time the arrows are pressed — which is the one control guaranteed to be pressed repeatedly. A sometimes-empty sixth row of faint dates is the cheaper cost. |
+| Layout density revisited | Two columns from 1280px, the page widened from 896px to 1280px, spacing cut by about a third | Generous whitespace was right for a page with three sections: add, summary, history. It carries ten now, and the same spacing that read as calm at three reads as a long walk at ten — the air stopped separating things and started hiding them, which is the opposite of what it was for. The value being protected was never whitespace itself but restraint, and at this size restraint means density done carefully. This is a real reversal of the original visual-style decision rather than a tweak, which is why it is written down as one. |
+| Widening the page is a precondition of splitting it | `max-w-4xl` → `max-w-7xl`, changed in the same commit as the columns | Two columns inside the old 896px would have given each about 416px — precisely the width that squeezed the pie legend to one letter per category in Session 11. The container query would have stopped it truncating, because that is what it is for, but the legend would have stacked permanently and the layout would have been worse than the one it replaced. Splitting a page and widening it are one decision, not two. |
+| The split starts at `xl`, not `lg` | 1280px | At 1024px the wide column is 587px inside its padding and the calendar grid needs 640px, so the grid would have begun scrolling sideways at exactly the window width where it gained a second column. A card getting narrower as the window gets wider is Session 11 exactly, in a feature two hours old. Between 1024px and 1280px the page stays single-column and simply gets wider, which both the calendar and the pie prefer. |
+| Panels fold, but only one starts folded | Analysis, day, expenses and categories collapse; categories is the one closed by default | A panel starts closed only if it is a tool you go looking for, never if it is information you would read. Nobody arrives wanting to rename a category. The charts and the calendar do not fold at all: a chart's whole value is being read without being asked for, so a folded chart is one you built and are not using — the crowding they cause is better answered by the columns. |
+| A folded panel is a labelled strip, not a blank box | The header stays, carrying a summary — "Expenses · 92 expenses" | This is the entire answer to the objection to remembering the state between visits. Somebody who folded four panels away a fortnight ago comes back to a page that says what they folded and what they would get back, rather than to an app that looks broken. |
+| The folded state persists, in `localStorage` | One key, only the closures stored, parsed through Zod | Folding a panel is a statement about what you care about, and an app that forgets it every reload makes the control pointless — you would do it, refresh, and find it undone. It is per-browser and never leaves the machine: no endpoint, no column, nothing the MCP server can see. It is still validated, because `localStorage` is a boundary like any other and the text there may have been written by an older version of this code. Anything that does not parse falls back to the defaults: a corrupt preference should cost you your layout, not the page. |
+| An unknown panel id is forgotten, not fatal | `z.array(z.string())` and then filter, rather than `z.array(z.enum(PANELS))` | The enum would refuse the whole list because of one entry it did not recognise, so renaming a panel later would reset everybody's layout instead of forgetting one line of it. "Ignored rather than an error" has to be written that way to actually mean it. |
+| The period control never folds | It sits in the panel header, which stays visible | It governs the cards, both charts, the expenses list and the written summary — every number on the page. A global control that hides itself is a bad control, so the analysis card's header was split from its body rather than collapsing as one piece. |
+| Receipt scanning was built, reversing a decision | Out of scope in three files until the reasons stopped applying | It was rejected for needing "file uploads and image storage", and for not working without a key. Reading the image in the browser leaves none of those true: nothing is uploaded, nothing is stored, and WebAssembly needs no key. The decision was not overruled — its premises expired, which is a different thing and worth recording as one. |
+| OCR runs in the browser, arithmetic runs on the server | Image never leaves the device; only the text is sent | Three reasons and only the first is privacy. The serverless deployment has no filesystem to put an image on. It has to work with no API key. And the normalizer wants `readNumber`, `isRealDate` and the English-and-Finnish month table, all of which already exist and are tested on the server — duplicating them in the browser is the second-definition mistake the daily-totals row was written against. |
+| The receipt reader is not the sentence parser | New code that borrows primitives, never `parseExpense` | A sentence is one clause with a preposition marking the shop. A receipt is forty lines with a name at the top and amounts flush right. Feeding one to the other would find an amount, occasionally the right one, and be wrong in ways nobody could predict. Borrowing `readNumber` is reuse; borrowing `findMerchant` would be a category error. |
+| The total is checked by arithmetic, not by confidence | Lines summing, VAT rate, card line repeated | Tesseract's confidence is about pixels — how cleanly a shape matched a glyph — so it is high on a clean misread and catches only illegible receipts. The case that matters is the legible one that says the wrong number. A receipt states the same fact several times and those statements are arithmetic, so they can be checked against each other without knowing anything about the image. |
+| A contradicted total arrives as an empty box | Not as a red-tinted filled-in one | The whole feature turns on this. A filled-in field gets approved at a glance whatever colour it is; an empty one cannot be. Same move as the empty date box, and the fourth time this project has answered "a plausible wrong value" with "make the failure a different shape, not a different colour". |
+| Both readings are offered, neither preselected | "Use 24.90 — what it adds up to" / "Use 2490.00 — what was printed" | When the arithmetic catches the error it usually also knows the answer, so clearing to blank throws away information. Preselecting either would put a value in the box, which is the thing being avoided. Offering both makes the choice explicit and takes one click. |
+| "Unverified" looks different from "checked" | Amber, the only third colour in the project | "We read a number" and "we checked a number" are different claims and showing them identically states the first as the second. This is a deliberate departure from the one-accent-colour rule: the design depends on three states being told apart at a glance, and grey against grey is not telling them apart. |
+| Damaged keywords are undone, not enumerated | Fold `0`→`o`, `1`→`l`, `5`→`s`, drop accents, then allow an edit or two | A list of the misspellings seen so far is a whitelist, and this project has now had two of those walked around by input nobody anticipated. Folding the damage covers spellings nobody has seen yet, which is the point. The slack is scaled to word length, because one edit on a three-letter word matches half a receipt. |
+| A label reads the line below it, when that line holds only an amount | "TOTAL" above "24,90 €" | A narrow receipt, or a photo taken at an angle, wraps the value onto its own line — and the first real example tried did exactly that, coming back with no total at all from a receipt anyone could read. The line below is taken only when it is an amount and essentially nothing else: a bare "YHTEENSÄ" above "Maito 1,29" must not hand back the price of the milk, which would be precisely the plausible-and-wrong answer this module exists to refuse. Found by writing the test, not by running the feature. |
+| An item's amount must have cents | "5" on a line with words is not a price | Found by an address: "Itämerenkatu 21, Helsinki" was read as a twenty-one euro purchase, which then contradicted a total that was perfectly correct. A receipt prints "5,00", never "5". A genuine whole-euro item is missed, and that is the safe direction — the sum then disagrees and a person is asked, rather than a wrong sum quietly confirming a wrong total. |
+| A discount makes a mismatch inconclusive, not wrong | Lines summing to *more* than the total is what a discount looks like | OCR rarely preserves a minus sign well enough to add discounts in with a negative value, so they are excluded and merely noticed. Lines summing to *less* than the total is money nothing accounts for and stays a disagreement either way. |
+| The boxes on the photo are elements, not a canvas | Positioned as a percentage of the image | A canvas needs the displayed size, so it needs redrawing on every resize and zoom, and produces nothing a check outside a browser can see. Percentage-positioned elements scale themselves and are ordinary markup, so the checks can assert the total really was marked without a browser being involved. |
+| Tesseract assets are self-hosted | ~14 MB in `frontend/public/tesseract/` | A CDN would keep the repository small and make scanning quietly dependent on a third party being reachable — offline or behind a restrictive network it would stop working with no way to tell why from inside the app. Both language files are shipped because the Finnish ones earn their size on YHTEENSÄ, ALV and the ä in a shop's name. |
+| tesseract.js, loaded on demand | The dependency, and why | It is the only WebAssembly OCR engine that runs in a browser with no service behind it, which the no-API-key rule requires. The alternative considered was a vision model, which would have been more accurate and needed a key and a paid service — it stays available as a second `ReceiptExtractor`, behind the same interface. Imported with a dynamic `import()` so several megabytes stay out of the first paint. |
+| The merchant is what survives, not what matches | No preposition required; the leftover after the amount, currency and date is the name | "32 euro netflix sept 5" has a shop name sitting between the amount and the date with nothing marking it. Requiring "at", "from", "in" or "on" was a whitelist of the ways a name can appear in a sentence, and there is always another way — the same shape as the query box only answering questions whose wording it had anticipated. Inverting it removes the list rather than lengthening it. |
+| A preposition splits, it no longer gates | Before it is what was bought, after it is where | It is genuinely the best evidence a sentence offers about the boundary, so it is still used first — "coffee and tea at k market" needs no guessing at all. What changed is that its absence is no longer fatal. |
+| Category keywords are two lists, not one | `items` are common nouns, `brands` are proper names | The conflation *was* the bug. "coffee" and "netflix" are both category evidence, but one says what was bought and the other says what was bought and where. With one list the merchant step could only refuse both, which is why a lowercase "netflix" alone in a sentence produced no merchant. An item word now says "this is not a name" and a brand word says "this is one". |
+| Without a marker, the name is the leading two words | And a brand ends it immediately | Nothing says where an unmarked name stops, and two is the length at which guessing is still usually right: "mustafa doner", "s market". A brand is a complete name by itself, so "89 eur ikea shelves" is Ikea and the shelves are what was bought there. A name with a stray word on the end is worse than a description missing a word, because only one of the two is shown as a heading. |
+| A lone unknown lowercase word gets no merchant | "5 constructor" and "4 eur pastry" both come back with none | Genuinely ambiguous — "32 euro kotipizza" and "32 euro chocolate" have the identical shape, and nothing in either sentence says which is a shop. Guessing would produce a merchant that looks exactly as deliberate as a correct one, which is the failure this project keeps having. A brand list and a capital letter cover the cases that *can* be settled; the confirm step covers the rest. |
+| Position gave way to meaning in the capital-letter rule | Any capitalised leftover, rejected if it names a thing | It used to skip the first leftover word to avoid claiming the capital that starts a sentence. That is a rule about where a word sits; asking whether it names a thing gives the same answer for "Coffee 4 eur" and a better one for "20 euro Kotipizza", which the positional rule missed. |
+| Month names are read, in English and Finnish | Full and abbreviated, either order, with or without a year | The numeric format the parser already read is the Finnish `4.9.2026`, and the time zone is Europe/Helsinki, so the user this app assumes is one who might also write "4. syyskuuta". English is there because "sept 4" is what got typed in the bug report. The Finnish endings are generated from one stem each rather than listed, because a month has five spellings in a date and writing sixty entries by hand is sixty chances to mistype one. |
+| A day and month with no year means the most recent one | On or before today — so "sept 4" is last year in August and this year in October | Somebody writing an expense is recording something already spent, so the reading that puts the date in the past is the one they meant. It also avoids producing a date the rest of the app refuses anyway, since nothing here accepts the future. Implemented by walking back a year at a time rather than by arithmetic, which is what makes "29 february" land on the most recent leap year for free. |
+| A written year is taken at its word | "4 September 2026" typed in August is reported as being in the future, not slid back to 2025 | Inference is for what somebody left out. Quietly overriding a year they actually typed would be the parser deciding it knows better than the sentence, which is the opposite of what the confirm step is for. |
+| An unreadable date is reported, never replaced with today | `expenseDate: null` plus a `dateNote` quoting the text that failed | The bug that prompted this: "sept 4" was not recognised, so the parser silently used today. Nothing was wrong on screen — the confirm step showed a perfectly plausible date, which is exactly why it would be scanned past. A wrong value that looks deliberate is worse than a missing one, and this project has now hit that shape of failure three times: the truncated pie legend, the trend chart quietly describing a different period, and this. So the parser says "I could not read this" the same way it already says "I could not find an amount". |
+| Three outcomes, not two | Found / unreadable / none | The distinction that makes the rule above workable. A sentence with no date in it is ordinary and today is right, quietly — most sentences are like that, and demanding a date every time would be unusable. A sentence that *tried* to name a date and failed is a different thing entirely. Collapsing the two is what produced the original bug. |
+| An out-of-range numeric triple is left alone | "45,99,26" stays a number; "31,02,26" is reported | Only a triple that is genuinely date-shaped — day 1 to 31, month 1 to 12 — is treated as an attempt at a date. Anything else is a grouped number somebody typed correctly, and refusing it would break amounts to fix dates. |
+| "may" needs a day beside it | Every other month name counts on its own | "may" is a common English verb, and treating every sentence containing it as a failed date would be worse than the problem it solves. With a number beside it — "may 4", "4 may" — the evidence is there and it reads normally. |
+| Panels carry a `data-panel` id | Not for styling, and not for the reader | A stable handle for the end-to-end checks. They found panels by the words in their headings first, which meant looking for "September" to find the day panel — a check that would have started failing in October, and one that could not tell one open panel from another. |
+| The calendar scrolls sideways rather than squeezing | `overflow-x-auto` and a minimum width, like the day table | Seven columns is seven columns whatever the screen is. On a phone that leaves a cell about twenty-five pixels for text and "€42.60" needs roughly forty, so the amounts would be clipped while still being present in the markup — which is exactly how the pie legend showed "B" for "Bills" and passed every check while doing it. |
 | Month arithmetic never touches a `Date` | Whole months shifted as numbers, the day attached afterwards | `setMonth` rolls over rather than clamping: 31 March minus one month is 3 March. Every block here begins on the 1st, so working in year-and-month pairs and only then attaching a day removes the trap instead of guarding against it. |
 | "Where" and "when" are questions, not decoration | `where` groups by shop, `when` groups by day | Both were in the whitelist and read by no shape, so "where did I spend the most" quietly became a plain total — the same silent half-answer arriving by a different route. |
 | A period phrase is the window, never the grouping | The matched period is removed before the bucket is chosen | "Where did I spend the most this month" grouped by *month* and answered with the highest month, having been asked about shops: "this month" was read once as the date range and then a second time as a grouping. A word cannot be both, and the window is the reading that already happened. |
@@ -3132,3 +3272,202 @@ thing anyone sees. A screenshot is a claim like any other.
 Three times today the honest move was to look at the artefact before installing it — the
 image, the target file, the served bundle. Each time it was wrong in a way that reading the
 instruction would never have revealed.
+
+---
+
+**Three more checks passed for the wrong reason, in one sitting**
+
+The habit from the calendar session did not stick, and the same mistake arrived three more
+times while the panels were being built. All three were written in the same minute as the code
+they check.
+
+- "the body is unmounted, not hidden" searched the markup for the word "hidden". The chevron
+  carries `aria-hidden` whether the panel is open or shut, so it found the word every time.
+- "the charts and the calendar have no toggle" counted buttons carrying `aria-expanded` and
+  expected four. It found nine: every row of the pie legend carries that attribute too, for the
+  drill-down panel it opens. The check was asking "how many things on this page expand" while
+  meaning "how many panels fold".
+- "clicking a date unfolds the day panel" asked whether *some* panel with a heading was open.
+  The analysis panel is open, so it would have passed while the panel under test stayed shut.
+
+Only the second announced itself, by failing on a number. The other two were found by rereading
+rather than by running. The fix in every case was to name the thing being asked about instead of
+guessing at it from the outside — which is why panels now carry a `data-panel` id.
+
+The pattern worth naming: **a check written from the outside of a component tends to match more
+than it means.** Searching a whole page's markup for a word, or counting every element with an
+attribute, is a question about the page when the intended question was about one part of it.
+
+**Two calendar checks passed for the wrong reason**
+
+Both were written in the same minute as the code they check, and both were worthless.
+
+The first asked whether the forward arrow was disabled by searching the markup for the word
+"disabled" near it. Every one of those buttons carries `disabled:opacity-30` in its class list
+whether it is disabled or not, so the test found the word every time and passed on both the
+enabled and the disabled button. It had to look for the `disabled=""` attribute specifically.
+
+The second was worse and simpler: it compared an expression with itself. `a.length === a.length`
+is true forever, so a check named "stepping the month did not refetch the day" asserted nothing
+at all. It now captures the count before the arrow is pressed and compares it after.
+
+Only one of the two announced itself, and by accident — the first happened to fail on the case
+it should have passed, which is what drew attention to it. Nothing would ever have flagged the
+second. A check that has never been seen to fail is not yet a check; it is a sentence about
+what somebody hoped.
+
+**A decision reversed because its premises expired**
+
+Receipt photos had been out of scope since the build plan, rejected in one line: "needs no file
+uploads or image storage, and still works in fake mode". Every clause of that was about *how* it
+would have to be built, not about whether it was worth having.
+
+Running the text recognition in the browser leaves none of them true. Nothing is uploaded,
+nothing is stored, and WebAssembly needs no key. So the decision was not overruled — its reasons
+stopped applying, which is a different thing, and the honest way to record it is to say which
+premise expired rather than to quietly delete the old line.
+
+Worth separating from the layout-density reversal earlier in this log. That one was a genuine
+change of mind: the same facts, weighed again at a different size. This one is the same judgement
+holding, with the world underneath it having moved.
+
+**Cross-checking is not confidence, and the difference is the whole feature**
+
+The instinct with OCR is to look at the engine's confidence score and act on it. That instinct
+is wrong here, and it took stating plainly to see why: **the score is about pixels.** It measures
+how cleanly a shape matched a glyph. A crisp photo where an 8 genuinely looks like a 3 scores
+above 90% and is wrong. So confidence catches an illegible receipt and never catches a legible
+one that says the wrong number — which is the only case that matters, because the illegible one
+announces itself.
+
+What works instead has nothing to do with the image. A receipt states the same fact more than
+once: the lines add up to the total, the VAT is a known rate of it, the card line repeats it.
+Those are arithmetic and can be checked against each other. `2490` against lines summing to
+`24,90` is caught without any opinion about pixels at all.
+
+The general shape, worth keeping: **when a process can be confidently wrong, look for redundancy
+in the input rather than for a better confidence signal from the process.**
+
+**A correct total, contradicted by an address**
+
+The first end-to-end run reported a perfectly good receipt as contradicted. The line was
+"Itämerenkatu 21, Helsinki" — a street address — and the number 21 in it was being counted as a
+twenty-one euro purchase, which made the lines add up to twenty-one euros more than the total.
+
+The fix is a rule rather than an exclusion list: **an item's amount must have cents.** A receipt
+prints "5,00", never "5", so a bare integer beside words is a house number, a till number or a
+quantity. That covers addresses, phone numbers and receipt numbers at once without naming any of
+them.
+
+It misses a genuine whole-euro item, and that is the safe direction: the sum then disagrees with
+the total and a person is asked, rather than a wrong sum quietly confirming a wrong total. Worth
+noticing that the failure was in the direction the design wants — a false alarm, not a silent
+acceptance.
+
+**The same whitelist mistake, in a second place**
+
+"32 euro netflix sept 5" came back with no merchant. The cause was that the merchant step only
+knew four shapes a name could take — after a preposition, two words at the start, a capital
+letter — and this sentence fits none of them: the name sits between the amount and the date with
+nothing marking it.
+
+This is the query box bug again. That one only answered questions whose wording it had
+anticipated, and every fix was another phrasing added to a list. **A whitelist of phrasings is
+only ever as complete as the imagination of whoever wrote it, and it fails silently** — a
+sentence that fits nothing produces nothing, with no error to notice.
+
+The fix both times was to invert the question. Not "does this match one of the shapes I know",
+but "what is left once everything I *can* identify has been taken away". The amount, the
+currency and the date are removed, and the words that say what was bought are known from the
+category table; whatever survives is the name. There is no list of phrasings to walk around,
+because there is no list.
+
+**One list was doing two jobs**
+
+The deeper cause was in the category table. It held "coffee" and "netflix" in the same array,
+as equally good evidence of a category — which they are. But they are completely different
+kinds of word: one says what was bought, the other says what was bought *and where*, because
+the company is the shop. The merchant step consulted that single list and could only do one
+thing with it, which was refuse everything in it. So "netflix" was rejected for being a
+category word, and there was no preposition to rescue it.
+
+Splitting it into `items` and `brands` made the table say something it always meant. The
+merchant step now reads an item word as "this is not a name" and a brand word as "this is one",
+and neither reading required a new rule — only a distinction that was already there implicitly.
+
+**What is still ambiguous, and left that way**
+
+"32 euro kotipizza" in lowercase, for a shop the brand list has never heard of, comes back with
+no merchant. So does "32 euro chocolate". They have the identical shape and nothing in either
+sentence distinguishes them, so guessing would produce a merchant that looks exactly as
+deliberate as a correct one — the failure this project keeps having. The confirm step is where
+a person settles what a rule cannot, and that is the whole reason it exists.
+
+**The third time the same shape of bug has been reported**
+
+"53 euros for clothes at uniqlo on sept 4" filed the expense under today. Nothing looked wrong:
+the confirm step showed a date, the date was real, the sentence had been read otherwise
+correctly. The parser had simply never understood month names, and its answer when it
+understood nothing was *today* — a value indistinguishable from a correct one.
+
+Worth putting beside the other two, because they are the same failure wearing different clothes:
+
+- the pie legend truncated "Bills" to "B", and looked deliberate
+- the trend chart described September under a dashboard showing July, and looked deliberate
+- the parser filed a September expense under today, and looked deliberate
+
+In all three, nothing errored, nothing warned, and the wrong output was shaped exactly like the
+right one. **The common cause is a fallback that produces a plausible value rather than an
+absent one.** Truncation produces a plausible short label. Pinning a chart to today produces a
+plausible window. Defaulting to today produces a plausible date. A person checking the screen
+has nothing to catch.
+
+The fix each time was the same in kind: make the failure occupy a different shape from the
+success. An empty date box is not a wrong date; it is visibly not a date at all.
+
+**Three outcomes rather than a boolean**
+
+The old `findDate` returned `{ date, explicit }`, and `explicit: false` meant both "no date was
+mentioned" and "a date was mentioned and I could not read it". Those are completely different
+situations and the code could not tell them apart, so it treated both as the first one.
+
+That is the whole bug, in one sentence, and it was in the type. A boolean where there are three
+states will always collapse two of them, and which two get collapsed is decided by whichever is
+convenient at the call site rather than by what is true.
+
+**Test data that contradicted itself**
+
+The first draft of the month-name tests asserted that "sept 4" reads as 4 September 2026, with
+today set to 31 August 2026. Twelve of them failed at once, and the code was right: September
+2026 had not happened yet, so the year rule correctly reached back to 2025. The table and the
+year-rule test sitting twenty lines below it were asserting opposite things.
+
+Cheap to fix and worth noticing anyway: a table of expected values written quickly is a place
+where a rule can be contradicted without the contradiction being visible, because each row
+looks reasonable on its own.
+
+**A reversal, written down as one**
+
+The original visual-style decision — light, clean, generous spacing — was made for a page with
+three sections on it. It has ten. Rather than quietly shrinking the padding and leaving the old
+row standing, the row was amended to say when it applied and a new one was added explaining what
+replaced it and why. The value being protected was never whitespace; it was restraint, and at
+this size restraint means density done carefully.
+
+Worth noticing that the width change and the column change are one decision rather than two.
+Two columns inside the old 896px page would have given each about 416px, which is the exact
+width that broke the pie legend. Splitting a page without widening it is not a smaller version
+of the same change; it is a different and worse one.
+
+**The layout the checks cannot see, again**
+
+The render checks say plainly at the top that they cannot see appearance, and the pie legend
+is the standing example. The calendar walked straight into the same trap: seven columns is
+seven columns whatever the screen is, and on a phone that leaves a cell about twenty-five
+pixels of room for text while "€42.60" needs roughly forty. Every amount would have been in
+the markup and clipped on the screen.
+
+There was no browser available to look, so this was reasoned from the numbers rather than
+seen — which is weaker, and is worth saying out loud. The grid now scrolls inside its own
+container below a minimum width, the way the day table already does, and two structural guards
+assert those two decisions. They are a tripwire, not proof.

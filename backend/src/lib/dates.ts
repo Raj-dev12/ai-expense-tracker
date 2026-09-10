@@ -140,6 +140,12 @@ export function daysInMonth(iso: string): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+/** The last day of the month a date falls in. */
+export function endOfMonth(iso: string): string {
+  const { year, month } = parts(iso);
+  return format(year, month, daysInMonth(iso));
+}
+
 /** Which day of the month this is: 1 to 31. */
 export function dayOfMonth(iso: string): number {
   return parts(iso).day;

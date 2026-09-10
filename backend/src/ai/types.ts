@@ -23,7 +23,22 @@ export type ExpenseSuggestion = {
    */
   category: string;
   description: string | null;
-  expenseDate: string;
+  /**
+   * Null when the sentence contained something meant to be a date that could not
+   * be read — not when it contained no date at all, which is answered with
+   * today. The confirm step leaves the box empty and refuses to save until a
+   * person fills it in, exactly as it does for a missing amount.
+   */
+  expenseDate: string | null;
+  /**
+   * Why there is no date, in words a person can read: "“31 February” is not a
+   * real date." Null whenever `expenseDate` is filled in.
+   *
+   * It quotes the text it failed on rather than saying something generic,
+   * because the person is about to look back at their own sentence and needs to
+   * know which part of it was the problem.
+   */
+  dateNote: string | null;
 };
 
 export type ParseResult = {

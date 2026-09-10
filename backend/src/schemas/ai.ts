@@ -27,7 +27,13 @@ export const expenseSuggestionSchema = z.strictObject({
   merchant: z.string().trim().min(1).max(120).nullable(),
   category: categorySchema,
   description: z.string().trim().max(500).nullable(),
-  expenseDate: isoDateSchema,
+  // Nullable for the same reason `amount` is: a parser that cannot work out a
+  // date should say so rather than invent one. The create endpoint still
+  // demands a real date — this is a suggestion, and a person fills the gap.
+  expenseDate: isoDateSchema.nullable(),
+  // Shown to a person beside an empty date box, so it is capped at a length that
+  // fits on a line rather than at prose length.
+  dateNote: z.string().trim().min(1).max(200).nullable(),
 });
 
 export const parseResultSchema = z.strictObject({

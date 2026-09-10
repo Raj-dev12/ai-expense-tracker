@@ -45,9 +45,14 @@ whenever a real choice gets made, including the reasoning.
 
 ## Scope discipline
 
-Build only what is in `build-plan.md`. Budgets, recurring expenses, CSV import, receipt
-photos and multi-user support are explicitly out of scope. If one seems worth adding,
-suggest it and wait — do not build it.
+Build only what is in `build-plan.md`. Budgets, recurring expenses, CSV import and
+multi-user support are explicitly out of scope. If one seems worth adding, suggest it and
+wait — do not build it.
+
+Receipt scanning *was* on that list and is now built. It came off it because the reasons it
+was rejected stopped applying: OCR runs in the browser, so there is no upload, no image
+storage and no API key. A reversal like that gets a row in the decisions table saying what
+changed, not a quiet edit.
 
 Do not add a dependency without saying what it's for and what the alternative was.
 

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { CategorySlice, Expense } from "../api";
 import { formatDayMonth, formatMoney, formatMonth } from "../format";
+import { CARD } from "./Panel";
 
 /**
  * The first six slots of the validated categorical palette, in order.
@@ -190,9 +191,9 @@ export function CategoryPie({
   }));
 
   return (
-    <section ref={card} className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-4">
-        <h2 className="text-base font-medium text-slate-900">Where it went</h2>
+    <section ref={card} className={CARD}>
+      <header className="mb-3">
+        <h2 className="text-sm font-medium text-slate-900">Where it went</h2>
         <p className="text-xs text-slate-400">{formatMonth(from)}, by category</p>
       </header>
 

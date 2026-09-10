@@ -41,8 +41,13 @@ export const mockParser: ExpenseParser = {
     //    shape with day and month ranges. "31,08,26" is also a well-formed
     //    grouped number, and reading it as a date is only possible if nothing
     //    has read it as a number first.
+    //
+    //    It has three outcomes rather than two. A sentence with no date in it
+    //    gets today, quietly, which is right and ordinary. A sentence that
+    //    plainly *tried* to name a date and failed gets no date at all, and a
+    //    note saying why.
     const date = findDate(trimmed, today);
-    const withoutDate = removeFirst(trimmed, date.matched);
+    const withoutDate = date.kind === "none" ? trimmed : removeFirst(trimmed, date.matched);
 
     // 2. The amount, from what the date did not use.
     const amount = findAmount(withoutDate);
@@ -77,7 +82,11 @@ export const mockParser: ExpenseParser = {
     if (amount.currency) confidence += 0.1;
     if (categoryMatched) confidence += 0.15;
     if (merchant.name) confidence += 0.1;
-    if (date.explicit) confidence += 0.1;
+    if (date.kind === "found") confidence += 0.1;
+    // A date that could not be read is worse than no date at all: something was
+    // said and not understood, so the parser is *less* sure of this sentence
+    // than of one that mentioned no date in the first place.
+    if (date.kind === "unreadable") confidence -= 0.1;
 
     return {
       suggestion: {
@@ -88,7 +97,19 @@ export const mockParser: ExpenseParser = {
         // The original sentence is kept as the description, so nothing the
         // person typed is lost between typing and confirming.
         description: trimmed.slice(0, 500),
-        expenseDate: date.date,
+        /**
+         * Null when a date-shaped phrase could not be read.
+         *
+         * The same decision `amount` already makes, for the same reason: a
+         * parser that cannot work something out should say so rather than
+         * invent a value. Today would be a *plausible* answer here, which is
+         * exactly what makes it the dangerous one — the confirm step shows the
+         * date, and a wrong date that looks deliberate is the one thing
+         * somebody scanning a screen full of sensible values will miss. An
+         * empty box cannot be missed.
+         */
+        expenseDate: date.kind === "unreadable" ? null : date.kind === "found" ? date.date : today,
+        dateNote: date.kind === "unreadable" ? date.problem : null,
       },
       confidence: Math.min(Math.round(confidence * 100) / 100, 0.95),
       producedBy: "mock",

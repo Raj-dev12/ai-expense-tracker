@@ -18,7 +18,11 @@ export const aiExpenseSchema = z.object({
   currency: z.string(),
   merchant: z.string().nullable(),
   category: z.enum(CATEGORY_NAMES),
-  expenseDate: z.string(),
+  expenseDate: z.string().nullable(),
+  // Optional as well as nullable. A model that ignores the instruction and omits
+  // the field should still produce a usable suggestion rather than a 502, since
+  // an absent note means the same thing as a null one.
+  dateNote: z.string().nullish(),
   confidence: z.number(),
 });
 
@@ -31,7 +35,20 @@ export function parseSystemPrompt(today: string): string {
     "",
     `Today is ${today}. Resolve relative dates such as "yesterday", "last friday" or`,
     '"3 days ago" against it, and return expenseDate as YYYY-MM-DD.',
+    "Month names may be English or Finnish, full or abbreviated, in either order,",
+    'with or without a year: "sept 4", "4 September 2026", "4. syyskuuta".',
+    "When a day and month are given with no year, use the most recent occurrence",
+    "on or before today — so in October, \"sept 4\" is this year, and in August it",
+    "is last year.",
     "Never return a date in the future.",
+    "",
+    "If the sentence contains something clearly meant to be a date that you",
+    "cannot resolve — an impossible day, a date after today, a month with no day",
+    "— return expenseDate as null and put a short explanation in dateNote,",
+    "quoting the text that failed. Do not fall back to today: a wrong date looks",
+    "exactly as deliberate as a right one, and a person checking this screen will",
+    "not catch it. When the sentence names no date at all, today is correct and",
+    "dateNote should be null.",
     "",
     `Choose exactly one category from: ${CATEGORY_NAMES.join(", ")}.`,
     'Use "Other" when none of them fit.',
@@ -93,6 +110,12 @@ export function toValidatedResult(
       category: raw.category,
       description: sentence.trim().slice(0, 500),
       expenseDate: raw.expenseDate,
+      // A model that returns a null date without saying why still has to say
+      // something, because the confirm step shows this note next to an empty
+      // box and an empty box with no explanation is its own small mystery.
+      dateNote: raw.expenseDate === null
+        ? (raw.dateNote?.trim() || "That date could not be read.")
+        : null,
     },
     // Clamped to the same ceiling the mock uses. No parser gets to claim
     // certainty, however confident it says it is.

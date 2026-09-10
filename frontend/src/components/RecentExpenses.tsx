@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Expense, ExpensePatch } from "../api";
 import { formatDayMonth, formatMoney } from "../format";
 import { ExpenseEditor } from "./ExpenseEditor";
+import { CollapsiblePanel } from "./Panel";
 
 /**
  * Every expense, newest first, in a box of its own.
@@ -28,6 +29,8 @@ export function RecentExpenses({
   onSaveEdit,
   categories,
   onDelete,
+  open,
+  onToggle,
 }: {
   expenses: Expense[];
   total: number;
@@ -41,21 +44,24 @@ export function RecentExpenses({
   onSaveEdit: (id: string, patch: ExpensePatch) => void;
   categories: string[];
   onDelete: (id: string) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
   // Which row is asking "are you sure?". Kept here rather than in the page
   // because it is a question about one row and dies with it.
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   return (
-    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-base font-medium text-slate-900">Expenses</h2>
-        <span className="text-xs text-slate-400">
-          {expenses.length === total
-            ? `${total} ${total === 1 ? "expense" : "expenses"}`
-            : `showing ${expenses.length} of ${total}`}
-        </span>
-      </header>
-
+    <CollapsiblePanel
+      id="recent"
+      title="Expenses"
+      note={
+        expenses.length === total
+          ? `${total} ${total === 1 ? "expense" : "expenses"}`
+          : `showing ${expenses.length} of ${total}`
+      }
+      open={open}
+      onToggle={onToggle}
+    >
       {expenses.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">Nothing saved yet.</p>
       ) : (
@@ -171,6 +177,6 @@ export function RecentExpenses({
           )}
         </ul>
       )}
-    </section>
+    </CollapsiblePanel>
   );
 }

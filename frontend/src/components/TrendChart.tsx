@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import type { TrendPoint } from "../api";
 import { formatDayMonth, formatMoney, formatMoneyShort } from "../format";
+import { CARD } from "./Panel";
 
 type Point = TrendPoint & { total: number };
 
@@ -61,9 +62,9 @@ export function TrendChart({
   );
 
   return (
-    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-4">
-        <h2 className="text-base font-medium text-slate-900">The last three months</h2>
+    <section className={CARD}>
+      <header className="mb-3">
+        <h2 className="text-sm font-medium text-slate-900">The last three months</h2>
         <p className="text-xs text-slate-400">
           Spending per week
           {busiest && busiest.total > 0 && (

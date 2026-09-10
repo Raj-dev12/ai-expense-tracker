@@ -1,5 +1,6 @@
 import type { Expense } from "../api";
 import { formatFullDay, formatMoney } from "../format";
+import { CollapsiblePanel } from "./Panel";
 
 /**
  * One day at a time, as a table.
@@ -13,51 +14,46 @@ import { formatFullDay, formatMoney } from "../format";
  * `to` pointed at the same date. A single day is a range whose ends match, so it
  * needs no endpoint of its own — and a second way to ask the same question is a
  * second place for the answer to drift.
+ *
+ * It has no date picker of its own. The calendar above it chooses the day, and
+ * two controls setting the same value would have to be kept in step for no gain
+ * — the calendar can already do everything the picker could, and shows what each
+ * day holds before you pick it. This component now only displays.
  */
 export function DayView({
   date,
   expenses,
   currency,
   loading,
-  onDateChange,
+  open,
+  onToggle,
 }: {
   date: string;
   expenses: Expense[];
   currency: string;
   loading: boolean;
-  onDateChange: (date: string) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const total = expenses.reduce((sum, expense) => sum + Number(expense.amountBase), 0);
 
+  const count = loading
+    ? "Loading..."
+    : expenses.length === 0
+      ? "Nothing recorded"
+      : `${expenses.length} ${expenses.length === 1 ? "expense" : "expenses"}`;
+
   return (
-    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h2 className="text-base font-medium text-slate-900">{formatFullDay(date)}</h2>
-          <p className="text-xs text-slate-400">
-            {loading
-              ? "Loading..."
-              : expenses.length === 0
-                ? "Nothing recorded"
-                : `${expenses.length} ${expenses.length === 1 ? "expense" : "expenses"}`}
-          </p>
-        </div>
-
-        <label className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">Day</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(event) => {
-              // An emptied date input reports "", which would ask the API for
-              // every expense ever. Ignoring it leaves the day where it was.
-              if (event.target.value) onDateChange(event.target.value);
-            }}
-            className="rounded-lg bg-white px-3 py-1.5 text-sm text-slate-900 ring-1 ring-slate-200 outline-none transition focus:ring-2 focus:ring-accent"
-          />
-        </label>
-      </header>
-
+    <CollapsiblePanel
+      id="day"
+      title={formatFullDay(date)}
+      note={count}
+      // Closed, it still carries the day's total, which is the one number
+      // somebody folding this panel away is most likely to want back.
+      summary={expenses.length === 0 ? count : `${count} · ${formatMoney(total, currency)}`}
+      open={open}
+      onToggle={onToggle}
+    >
       {expenses.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
           {loading ? "..." : "Nothing spent on this day."}
@@ -106,6 +102,6 @@ export function DayView({
           </table>
         </div>
       )}
-    </section>
+    </CollapsiblePanel>
   );
 }

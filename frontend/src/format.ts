@@ -72,6 +72,13 @@ export function formatDayMonth(iso: string): string {
   return dayMonth.format(new Date(`${iso}T00:00:00Z`));
 }
 
+const monthYear = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" });
+
+/** "2026-09-01" becomes "September 2026". The calendar's own heading. */
+export function formatMonthYear(iso: string): string {
+  return monthYear.format(new Date(`${iso}T00:00:00Z`));
+}
+
 const monthName = new Intl.DateTimeFormat("en-GB", { month: "long" });
 
 export function formatMonth(iso: string): string {

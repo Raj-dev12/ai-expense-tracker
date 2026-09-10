@@ -1,5 +1,6 @@
 import type { CategoryName } from "../lib/categories.js";
 import { addDays } from "../lib/dates.js";
+import { MONTH_NAME_PATTERN, monthFromName, needsADayBeside } from "./month-names.js";
 
 /**
  * The extraction steps used by the mock parser, in the order they must run.
@@ -96,7 +97,7 @@ function pad(value: number): string {
  * 3rd of March — so the only way to reject one is to build it and check every
  * part came back unchanged.
  */
-function isRealDate(year: number, month: number, day: number): boolean {
+export function isRealDate(year: number, month: number, day: number): boolean {
   if (month < 1 || month > 12 || day < 1 || day > 31) return false;
   const built = new Date(Date.UTC(year, month - 1, day));
   return (
@@ -106,59 +107,188 @@ function isRealDate(year: number, month: number, day: number): boolean {
   );
 }
 
-export type DateFinding = {
-  date: string;
-  /** True when the sentence actually said a date, rather than defaulting to today. */
-  explicit: boolean;
-  /** The exact text used, so the caller can remove it before the next step. */
-  matched: string | null;
-};
+export type DateFinding =
+  /** A date was read. */
+  | { kind: "found"; date: string; matched: string }
+  /**
+   * Something in the sentence was clearly meant to be a date and could not be
+   * turned into one. This is a separate outcome from "no date", and the whole
+   * reason it exists: falling back to today here would produce a wrong date that
+   * looks exactly like a deliberate one.
+   */
+  | { kind: "unreadable"; matched: string; problem: string }
+  /** The sentence mentioned no date. Today is the right default, quietly. */
+  | { kind: "none" };
+
+/**
+ * The year to assume when a date names a day and a month but no year.
+ *
+ * **The most recent occurrence on or before today.** "sept 4" typed in October
+ * 2026 is 4 September 2026; the same words typed in August 2026 are 4 September
+ * *2025*, because September 2026 has not happened yet. People writing an expense
+ * are recording something they have already spent, so the reading that puts the
+ * date in the past is the one they meant — and the alternative produces a date
+ * the rest of the app refuses anyway, since nothing here accepts the future.
+ *
+ * Walking backwards a year at a time rather than doing arithmetic is what makes
+ * "29 february" work: it simply keeps going until it finds a year where that day
+ * existed, which is the most recent leap year. Eight years is far more than any
+ * of this needs and still terminates on a day that never exists — 31 February
+ * finds nothing and is reported as unreadable.
+ */
+export function mostRecentOccurrence(month: number, day: number, today: string): string | null {
+  const thisYear = Number(today.slice(0, 4));
+
+  for (let year = thisYear; year >= thisYear - 8; year -= 1) {
+    if (!isRealDate(year, month, day)) continue;
+    const value = `${year}-${pad(month)}-${pad(day)}`;
+    if (value <= today) return value;
+  }
+
+  return null;
+}
+
+/**
+ * The part of a match worth quoting back at a person.
+ *
+ * The match deliberately includes a leading preposition so that "on" is removed
+ * along with the date — left behind, it is a word the merchant step anchors
+ * names to. But a message reading “on 31 february” is not a real date quotes a
+ * word the person did not get wrong, so the preposition is trimmed here, where
+ * the text is being read rather than removed.
+ */
+function quotable(matched: string): string {
+  return matched.trim().replace(/^(?:on|in|the|of)\s+/i, "").trim();
+}
+
+/**
+ * Turn a day, a month and possibly a year into a finding.
+ *
+ * The three outcomes are the point. A date that is impossible and a date that
+ * has not happened yet are both *unreadable* rather than ignored, because both
+ * were unmistakably meant to be dates.
+ */
+function resolve(
+  matched: string,
+  day: number,
+  month: number,
+  writtenYear: number | null,
+  today: string,
+): DateFinding {
+  if (writtenYear === null) {
+    const date = mostRecentOccurrence(month, day, today);
+    return date === null
+      ? { kind: "unreadable", matched, problem: `“${quotable(matched)}” is not a real date.` }
+      : { kind: "found", date, matched };
+  }
+
+  if (!isRealDate(writtenYear, month, day)) {
+    return { kind: "unreadable", matched, problem: `“${quotable(matched)}” is not a real date.` };
+  }
+
+  const date = `${writtenYear}-${pad(month)}-${pad(day)}`;
+  return date <= today
+    ? { kind: "found", date, matched }
+    : { kind: "unreadable", matched, problem: `“${quotable(matched)}” is in the future.` };
+}
+
+/** Two digits mean this century. The only reading that makes sense for spending. */
+function fullYear(written: string | undefined): number | null {
+  if (!written) return null;
+  const value = Number(written);
+  return written.length === 2 ? 2000 + value : value;
+}
+
+// A day, with an English ordinal suffix or a Finnish full stop, both optional.
+const DAY = String.raw`([0-9]{1,2})(?:st|nd|rd|th)?\.?`;
+// A month name, with an optional abbreviating full stop.
+const MONTH = `(${MONTH_NAME_PATTERN})\\.?`;
+const YEAR = String.raw`([0-9]{4}|[0-9]{2})`;
+
+/**
+ * Day first: "4 sept", "4th September 2026", "4. syyskuuta", "on the 4th of May".
+ *
+ * The leading preposition is part of the match so that it is removed with the
+ * date. Left behind, "on" is a word the merchant step anchors names to, and
+ * "at uniqlo on sept 4" would have looked to it like a shop called "4".
+ */
+const DAY_FIRST = new RegExp(
+  String.raw`\b(?:on\s+)?(?:the\s+)?${DAY}\s+(?:of\s+)?${MONTH}(?:\s*,?\s+${YEAR})?\b`,
+  "i",
+);
+
+/** Month first: "sept 4", "September 4th", "Sep 4, 2026", "syyskuun 4.". */
+const MONTH_FIRST = new RegExp(
+  String.raw`\b(?:on\s+)?${MONTH}\s+${DAY}(?:\s*,?\s+${YEAR})?\b`,
+  "i",
+);
+
+/** A month named with no day anywhere beside it: "in september", "syyskuussa". */
+const MONTH_ALONE = new RegExp(String.raw`\b(?:in\s+)?(${MONTH_NAME_PATTERN})\.?\b`, "i");
 
 /**
  * Find a date.
  *
- * Two written forms are understood:
+ * The written forms understood, in the order they are tried:
  *
- *   - ISO, `2026-07-14`. Unambiguous, because a four-digit leading group cannot
- *     be a day.
- *   - Day first, `31.8.2026`, `31.08.26`, `31,08,26`, `31/8/26`. This is the
- *     Finnish convention and the one a Finnish user will actually type: day,
- *     then month, then a two- or four-digit year. The separator may be a dot, a
- *     comma, a slash or a hyphen, but it must be the *same* separator both
- *     times, so "31.08,26" is not read as a date.
+ *   - ISO, `2026-07-14`. Unambiguous: a four-digit leading group cannot be a day.
+ *   - Day first and numeric, `31.8.2026`, `31.08.26`, `31,08,26`, `31/8/26`. The
+ *     Finnish convention and the one a Finnish user will actually type. The
+ *     separator may be a dot, a comma, a slash or a hyphen, but it must be the
+ *     *same* one both times, so "31.08,26" is not a date.
+ *   - Day first with a month name, `4 sept`, `4th September 2026`,
+ *     `4. syyskuuta`, `on the 4th of May`.
+ *   - Month first with a month name, `sept 4`, `September 4th`, `Sep 4, 2026`.
+ *   - Relative phrases, `yesterday`, `3 days ago`, `last friday`.
+ *   - A month named with no day: not a date, but plainly an attempt at one.
  *
- * Two-digit years are read as 2000-something, which is the only reading that
- * makes sense for an expense tracker.
+ * Month names are English or Finnish, full or abbreviated, and Finnish takes any
+ * of the endings a date uses. See month-names.ts.
  *
- * A date that has not happened yet is refused rather than returned. The mock is
- * allowed to be wrong, but it is not allowed to produce a value its own
- * validation will reject — that turns a bad guess into a failed request.
+ * WHAT HAPPENS WHEN IT CANNOT READ ONE
+ * ------------------------------------
+ * It says so, rather than quietly returning today. That distinction is the point
+ * of this function's three outcomes and is worth stating plainly: a sentence
+ * with no date in it is an ordinary thing and today is the right answer, but a
+ * sentence that clearly *tried* to say a date and failed must not be answered
+ * with a date that looks just as deliberate as a correct one. The confirm step
+ * shows the date either way, and a wrong date that looks deliberate is the one
+ * thing a person checking a screen full of plausible values will miss.
  */
 export function findDate(text: string, today: string): DateFinding {
   const iso = text.match(/\b([0-9]{4})-([0-9]{2})-([0-9]{2})\b/);
   if (iso) {
     const [matched, y, m, d] = iso;
-    const year = Number(y);
-    const month = Number(m);
-    const day = Number(d);
-    const value = `${year}-${pad(month)}-${pad(day)}`;
-    if (isRealDate(year, month, day) && value <= today) {
-      return { date: value, explicit: true, matched };
-    }
+    return resolve(matched, Number(d), Number(m), Number(y), today);
   }
 
   // Day first. The backreference forces the same separator in both places.
   const written = text.match(/\b([0-9]{1,2})([.,/-])([0-9]{1,2})\2([0-9]{4}|[0-9]{2})\b/);
   if (written) {
     const [matched, d, , m, y] = written;
-    const rawYear = Number(y);
-    const year = (y ?? "").length === 2 ? 2000 + rawYear : rawYear;
-    const month = Number(m);
     const day = Number(d);
-    const value = `${year}-${pad(month)}-${pad(day)}`;
-    if (isRealDate(year, month, day) && value <= today) {
-      return { date: value, explicit: true, matched };
+    const month = Number(m);
+    // Only treated as a date at all when the numbers are in range for one.
+    // "45,99,26" is not a misspelt date, it is a grouped number, and claiming
+    // otherwise would refuse an amount somebody typed correctly. A date-shaped
+    // triple that fails only on the calendar — "31,02,26" — is a different
+    // matter, and is reported rather than ignored.
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return resolve(matched, day, month, fullYear(y), today);
     }
+  }
+
+  for (const pattern of [DAY_FIRST, MONTH_FIRST]) {
+    const match = text.match(pattern);
+    if (!match) continue;
+
+    const dayFirst = pattern === DAY_FIRST;
+    const day = Number(dayFirst ? match[1] : match[2]);
+    const name = (dayFirst ? match[2] : match[1]) ?? "";
+    const month = monthFromName(name);
+    if (month === null) continue;
+
+    return resolve(match[0], day, month, fullYear(match[3]), today);
   }
 
   const phrases: Array<{ pattern: RegExp; resolve: (match: RegExpMatchArray) => string }> = [
@@ -184,12 +314,25 @@ export function findDate(text: string, today: string): DateFinding {
     },
   ];
 
-  for (const { pattern, resolve } of phrases) {
+  for (const { pattern, resolve: toDate } of phrases) {
     const match = text.match(pattern);
-    if (match) return { date: resolve(match), explicit: true, matched: match[0] };
+    if (match) return { kind: "found", date: toDate(match), matched: match[0] };
   }
 
-  return { date: today, explicit: false, matched: null };
+  // A month with no day beside it. Not a date — a month is a period, not a day —
+  // but unmistakably an attempt at one, so it is reported rather than ignored.
+  // "may" is excluded: it is a common English verb, and treating every sentence
+  // containing it as a failed date would be worse than the problem.
+  const alone = text.match(MONTH_ALONE);
+  if (alone && !needsADayBeside(alone[1] ?? "")) {
+    return {
+      kind: "unreadable",
+      matched: alone[0],
+      problem: `“${(alone[1] ?? "").trim()}” names a month but not a day.`,
+    };
+  }
+
+  return { kind: "none" };
 }
 
 // ---------------------------------------------------------------------------
@@ -270,21 +413,96 @@ export function findCurrencyAnywhere(text: string): string | null {
 // Categories
 // ---------------------------------------------------------------------------
 
-// Checked in order, so the more specific categories win. "Flight to Berlin"
-// should be Travel even though "ticket" would also look like Transport.
-const CATEGORY_KEYWORDS: ReadonlyArray<{ category: CategoryName; words: readonly string[] }> = [
-  { category: "Travel", words: ["flight", "flights", "hotel", "hostel", "airbnb", "booking.com", "holiday", "trip", "finnair", "norwegian", "ryanair", "easyjet"] },
-  { category: "Health", words: ["pharmacy", "apteekki", "chemist", "doctor", "dentist", "dental", "medicine", "prescription", "physio", "hospital", "optician"] },
-  { category: "Bills", words: ["bill", "bills", "electricity", "internet", "broadband", "water", "heating", "insurance", "elisa", "telia", "helen", "hsy"] },
-  { category: "Entertainment", words: ["cinema", "movie", "film", "concert", "gig", "netflix", "spotify", "museum", "theatre", "theater", "festival", "finnkino"] },
-  { category: "Groceries", words: ["groceries", "grocery", "supermarket", "lidl", "aldi", "prisma", "alepa", "k-market", "s-market", "milk", "bread", "vegetables"] },
-  { category: "Restaurants", words: ["restaurant", "lunch", "dinner", "breakfast", "brunch", "coffee", "cafe", "café", "pizza", "sushi", "burger", "takeaway", "pub", "beer", "wine", "kebab"] },
-  { category: "Transport", words: ["taxi", "uber", "bolt", "train", "bus", "tram", "metro", "ticket", "fuel", "petrol", "diesel", "parking", "hsl", "neste"] },
-  { category: "Shopping", words: ["clothes", "shoes", "jacket", "shirt", "jeans", "amazon", "ikea", "headphones", "laptop", "phone", "book", "books", "furniture"] },
+/**
+ * The words that name a category, split into two kinds.
+ *
+ * THE DISTINCTION THAT MATTERS
+ * ----------------------------
+ * These used to be one list, and that conflation was a bug waiting to be
+ * reported. "coffee" and "netflix" are both evidence of a category, but they are
+ * completely different kinds of word:
+ *
+ *   items  — common nouns. They say *what was bought*. "coffee", "dentist",
+ *            "cinema", "clothes". A sentence containing one is not naming a shop.
+ *   brands — proper names. They say what was bought *and where*, because the
+ *            company is the merchant. "netflix", "lidl", "ikea", "finnair".
+ *
+ * The merchant step needs to tell them apart. With one list it could only refuse
+ * all of them, which is why "32 euro netflix sept 5" came back with no merchant:
+ * "netflix" was rejected as a category word, and there was no preposition to
+ * rescue it. With two, an item word says "this is not a name" and a brand word
+ * says "this is one".
+ *
+ * Checked in order, so the more specific categories win. "Flight to Berlin"
+ * should be Travel even though "ticket" would also look like Transport.
+ */
+const CATEGORY_KEYWORDS: ReadonlyArray<{
+  category: CategoryName;
+  items: readonly string[];
+  brands: readonly string[];
+}> = [
+  {
+    category: "Travel",
+    items: ["flight", "flights", "hotel", "hostel", "holiday", "trip"],
+    brands: ["airbnb", "booking.com", "finnair", "norwegian", "ryanair", "easyjet"],
+  },
+  {
+    category: "Health",
+    items: ["pharmacy", "apteekki", "chemist", "doctor", "dentist", "dental", "medicine", "prescription", "physio", "hospital", "optician"],
+    brands: [],
+  },
+  {
+    category: "Bills",
+    items: ["bill", "bills", "electricity", "internet", "broadband", "water", "heating", "insurance"],
+    brands: ["elisa", "telia", "helen", "hsy"],
+  },
+  {
+    category: "Entertainment",
+    items: ["cinema", "movie", "film", "concert", "gig", "museum", "theatre", "theater", "festival"],
+    brands: ["netflix", "spotify", "finnkino"],
+  },
+  {
+    category: "Groceries",
+    items: ["groceries", "grocery", "supermarket", "milk", "bread", "vegetables"],
+    brands: ["lidl", "aldi", "prisma", "alepa", "k-market", "s-market"],
+  },
+  {
+    category: "Restaurants",
+    items: ["restaurant", "lunch", "dinner", "breakfast", "brunch", "coffee", "cafe", "café", "pizza", "sushi", "burger", "takeaway", "pub", "beer", "wine", "kebab"],
+    brands: ["kotipizza", "hesburger"],
+  },
+  {
+    category: "Transport",
+    items: ["taxi", "train", "bus", "tram", "metro", "ticket", "fuel", "petrol", "diesel", "parking"],
+    brands: ["uber", "bolt", "hsl", "neste"],
+  },
+  {
+    category: "Shopping",
+    items: ["clothes", "shoes", "jacket", "shirt", "jeans", "headphones", "laptop", "phone", "book", "books", "furniture"],
+    brands: ["amazon", "ikea"],
+  },
 ];
 
-/** Every category keyword, for the merchant step to avoid claiming one. */
-const CATEGORY_WORDS = new Set(CATEGORY_KEYWORDS.flatMap((entry) => entry.words));
+/**
+ * Common nouns: a word that says what was bought, and so is never a shop name.
+ *
+ * This is the only list the merchant step consults, and it consults it as a
+ * *negative* — "this word is a thing, not a place". It is not a list of the ways
+ * a merchant can look, which is the trap the preposition rule fell into.
+ */
+const ITEM_WORDS = new Set(CATEGORY_KEYWORDS.flatMap((entry) => entry.items));
+
+/**
+ * Proper names: the shop is the word.
+ *
+ * Evidence, never a requirement. A name that is not in here is still found by
+ * everything else — a preposition pointing at it, a capital letter, or simply
+ * being what is left once every other step has taken its share. The list exists
+ * so that a lowercase, unmarked, unremarkable "netflix" sitting alone in the
+ * middle of a sentence can still be recognised, which is the one case nothing
+ * structural can settle.
+ */
+const BRAND_WORDS = new Set(CATEGORY_KEYWORDS.flatMap((entry) => entry.brands));
 
 /**
  * Categories are read from the whole sentence rather than from what is left.
@@ -298,7 +516,7 @@ export function findCategory(text: string): { category: CategoryName; matched: b
   const lower = text.toLowerCase();
 
   for (const entry of CATEGORY_KEYWORDS) {
-    if (entry.words.some((word) => lower.includes(word))) {
+    if ([...entry.items, ...entry.brands].some((word) => lower.includes(word))) {
       return { category: entry.category, matched: true };
     }
   }
@@ -310,6 +528,19 @@ export function findCategory(text: string): { category: CategoryName; matched: b
 // Merchants
 // ---------------------------------------------------------------------------
 
+/**
+ * Prepositions that separate what was bought from where it was bought.
+ *
+ * These no longer *gate* the merchant step — they split it. Requiring one was a
+ * whitelist of the ways a name can appear in a sentence, and there is always
+ * another way: "32 euro netflix sept 5" has a shop name sitting between the
+ * amount and the date with nothing marking it at all. The same shape of mistake
+ * as the query box only answering questions whose wording it had anticipated.
+ *
+ * What they are still good for is the boundary. When one is present, everything
+ * before it is what was bought and everything after it is where — "coffee and
+ * tea at k market" splits cleanly and no guessing is needed.
+ */
 const MERCHANT_PREPOSITIONS = new Set(["at", "from", "in", "on"]);
 const MERCHANT_LEADING_WORDS = new Set(["the", "a", "an", "my"]);
 
@@ -356,6 +587,31 @@ function isNameWord(word: string, started: boolean): "take" | "skip" | "stop" {
 }
 
 /**
+ * Whether one word, standing alone, is a name rather than a thing.
+ *
+ * Asked only when a single word is all that is left and there is no preposition
+ * pointing at it — "32 euro netflix sept 5" leaves exactly "netflix". Three
+ * answers in order of confidence:
+ *
+ *   - a known brand is a name, because the company is the shop
+ *   - a known common noun is not, because it says what was bought
+ *   - anything else is judged by its capital letter, which is the only signal
+ *     an unknown word carries
+ *
+ * The last of those is why "32 euro kotipizza" written in lowercase, for a shop
+ * nothing here has heard of, comes back with no merchant. That is not a gap to
+ * be filled with a longer list: one unremarkable lowercase word is genuinely
+ * ambiguous — "32 euro chocolate" has the identical shape — and the confirm step
+ * is where a person settles what a rule cannot.
+ */
+function standsAloneAsAName(word: string): boolean {
+  const lower = word.toLowerCase();
+  if (BRAND_WORDS.has(lower)) return true;
+  if (ITEM_WORDS.has(lower)) return false;
+  return /^[A-ZÀ-Þ]/.test(word);
+}
+
+/**
  * Decide whether the collected words are actually a name.
  *
  * Two things are not names however they were collected, and both are checked on
@@ -374,21 +630,55 @@ function acceptName(collected: string[]): string | null {
 }
 
 /**
- * Guess a shop name from the words no other step claimed.
+ * How many words a name can run to when nothing marks where it ends.
  *
- * Three tiers, strongest evidence first:
+ * After a preposition there is a marker, so four is safe. Without one there is
+ * nothing at all saying where the name stops and the description starts, and two
+ * is the length at which guessing is still usually right: "mustafa doner",
+ * "k market", "s market". "s market chocolate" gives up "chocolate", which is
+ * the correct trade — a name with a stray word on the end is worse than a name
+ * with a word missing from the description, because only one of the two is shown
+ * as a heading.
+ */
+const MAX_UNMARKED_NAME_WORDS = 2;
+
+/**
+ * What is left over, once every other step has taken its share.
  *
- *   1. After a preposition. "at", "from", "in" and "on" are followed by the
- *      thing paid, which is the clearest signal a sentence offers. Up to four
- *      words.
- *   2. At the start of what is left. With the date and the amount removed,
- *      leading leftover words are usually the name — "mustafa doner 20 euros"
- *      leaves "mustafa doner". Capped at two words and requiring at least two,
- *      because without a preposition the evidence is weaker: one leftover word
- *      is far more often the item bought than the shop.
- *   3. A capitalised word. Only reached when the first two find nothing, and a
- *      hint rather than a requirement — capitalisation is never needed by tiers
- *      1 and 2.
+ * THE INVERSION
+ * -------------
+ * This used to ask "does this sentence contain one of the four shapes I know a
+ * merchant can take?" — after a preposition, two words at the start, or a
+ * capital letter. That is a whitelist of phrasings, and a whitelist of phrasings
+ * can always be walked around: "32 euro netflix sept 5" fits none of them and
+ * has an obvious merchant in it.
+ *
+ * It now asks the opposite question. The amount, the currency and the date have
+ * been identified and removed, and the words that say what was *bought* are
+ * known from the category table. Whatever survives all of that is the name.
+ * There is no list of phrasings to outflank, because there is no list — the
+ * sentence is being reduced rather than matched.
+ *
+ * SPLITTING WHAT IS LEFT
+ * ----------------------
+ * The leftover can hold a name, a description, or both, and the rules for
+ * telling them apart are these, in order:
+ *
+ *   1. A preposition, if there is one, is the boundary. Before it is what was
+ *      bought; after it is where. "coffee and tea at k market" needs no guessing.
+ *   2. With no preposition, the leading run of leftover words is the name, up to
+ *      two, stopping at any word that says what was bought. "s market chocolate"
+ *      gives "S Market"; "cinema tickets" gives nothing, because it opens with a
+ *      thing rather than a place.
+ *   3. A single leftover word is a name only if it looks like one on its own —
+ *      a brand, or a capital letter. "netflix" yes, "coffee" no.
+ *   4. Failing all of that, any capitalised leftover word anywhere. A capital in
+ *      the middle of a sentence is somebody typing a proper noun.
+ *
+ * The description needs no rule of its own, because `description` keeps the
+ * whole sentence exactly as it was typed — an earlier decision, so that nothing
+ * a person wrote is lost between typing and confirming. The split above decides
+ * what is promoted to a name; everything else stays where it already is.
  */
 export type MerchantFinding = {
   name: string | null;
@@ -399,7 +689,10 @@ export type MerchantFinding = {
 export function findMerchant(text: string): MerchantFinding {
   const words = text.trim().split(/\s+/).filter(Boolean);
 
-  // Tier 1 — anchored on a preposition.
+  // 1. A preposition marks the boundary. Item words are deliberately *not*
+  //    checked here: "at cafe regatta" is a shop whose name happens to start
+  //    with a word that also names a category, and the preposition is stronger
+  //    evidence than the word list.
   for (let i = 0; i < words.length; i += 1) {
     if (!MERCHANT_PREPOSITIONS.has(bareWord(words[i] ?? "").toLowerCase())) continue;
 
@@ -418,31 +711,45 @@ export function findMerchant(text: string): MerchantFinding {
     if (name) return { name: capitaliseWords(name), words: collected };
   }
 
-  // Tier 2 — the leftover words at the start. Capped at two and requiring two,
-  // because without a preposition the evidence is weaker: one leftover word is
-  // far more often the thing bought than the shop.
+  // 2 and 3. No preposition, so the leftover speaks for itself.
   const leading: string[] = [];
   for (const raw of words) {
-    if (leading.length >= 2) break;
+    if (leading.length >= MAX_UNMARKED_NAME_WORDS) break;
     const word = bareWord(raw);
     const verdict = isNameWord(word, leading.length > 0);
     if (verdict === "stop") break;
     if (verdict === "skip") continue;
-    // A category keyword describes what was bought, not where.
-    if (CATEGORY_WORDS.has(word.toLowerCase())) break;
+    // A word that says what was bought ends the name rather than joining it.
+    // A brand does not: it says what was bought *and* where.
+    if (ITEM_WORDS.has(word.toLowerCase())) break;
     leading.push(word);
+    // A brand is a complete name by itself, so the name ends with it rather than
+    // running on: "89 eur ikea shelves" is Ikea, and the shelves are what was
+    // bought there. Without this the two-word run would swallow both.
+    if (BRAND_WORDS.has(word.toLowerCase())) break;
   }
-  if (leading.length >= 2) {
+
+  const enoughOnItsOwn =
+    leading.length >= 2 || (leading.length === 1 && standsAloneAsAName(leading[0] ?? ""));
+
+  if (enoughOnItsOwn) {
     const name = acceptName(leading);
     if (name) return { name: capitaliseWords(name), words: leading };
   }
 
-  // Tier 3 — a capital letter, as a last hint rather than a requirement.
-  for (let i = 1; i < words.length; i += 1) {
-    const word = bareWord(words[i] ?? "");
+  // 4. A capital letter anywhere in what is left.
+  //
+  // This used to skip the first word, to avoid claiming the capital that begins
+  // a sentence. Asking whether the word is a *thing* is the better question and
+  // does not depend on where it sits: "Coffee 4 eur" is refused because coffee
+  // is something you buy, not because of its position, and a name that happens
+  // to open the leftover is no longer missed.
+  for (const raw of words) {
+    const word = bareWord(raw);
     if (word.length < 2) continue;
     if (!/^[A-ZÀ-Þ]/.test(word)) continue;
     if (MERCHANT_STOP_WORDS.has(word.toLowerCase())) continue;
+    if (ITEM_WORDS.has(word.toLowerCase())) continue;
     if (currencyFor(word)) continue;
     return { name: word, words: [word] };
   }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Category, DeleteMode } from "../api";
+import { CollapsiblePanel } from "./Panel";
 
 /**
  * Everything you can do to the list of categories, in one place.
@@ -21,6 +22,8 @@ export function CategoryManager({
   onAdd,
   onRename,
   onDelete,
+  open,
+  onToggle,
 }: {
   categories: Category[];
   /** The one category that cannot be renamed or removed. */
@@ -30,6 +33,8 @@ export function CategoryManager({
   onAdd: (name: string) => void;
   onRename: (name: string, to: string) => void;
   onDelete: (name: string, mode: DeleteMode) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const [adding, setAdding] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -46,12 +51,14 @@ export function CategoryManager({
   }
 
   return (
-    <section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
-      <header className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-base font-medium text-slate-900">Categories</h2>
-        <span className="text-xs text-slate-400">{categories.length}</span>
-      </header>
-
+    <CollapsiblePanel
+      id="categories"
+      title="Categories"
+      note={`${categories.length}`}
+      summary={`${categories.length} categories`}
+      open={open}
+      onToggle={onToggle}
+    >
       {error && (
         <p className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
@@ -253,6 +260,6 @@ export function CategoryManager({
           </li>
         ))}
       </ul>
-    </section>
+    </CollapsiblePanel>
   );
 }

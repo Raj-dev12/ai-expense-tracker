@@ -18,6 +18,7 @@
  * they cannot see the layout either, but they assert the two specific decisions
  * that caused that bug. Treat them as a tripwire, not as proof.
  */
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createCategory, deleteCategory, deleteExpense, listExpenses } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
@@ -33,7 +34,14 @@ import {
   type Period,
   type Selection,
 } from "./periods";
+import { endOfMonth, isInMonth, monthGrid, monthWindow, shiftMonth } from "./calendar";
+import { addDays } from "./periods";
+import { readCollapsed, type PanelId } from "./panels";
+import { ReceiptReview } from "./components/ReceiptReview";
+import { ReceiptScanner } from "./components/ReceiptScanner";
+import type { ReceiptData, TotalVerdict } from "./api";
 import { PeriodPicker } from "./components/PeriodPicker";
+import { Calendar } from "./components/Calendar";
 import { BaseCurrencyPicker } from "./components/BaseCurrencyPicker";
 import { CurrencyChoice } from "./components/CurrencyChoice";
 import { CategoryManager } from "./components/CategoryManager";
@@ -45,6 +53,14 @@ import { RecentExpenses } from "./components/RecentExpenses";
 import { SuggestionReview } from "./components/SuggestionReview";
 import { SummaryCards } from "./components/SummaryCards";
 import { TrendChart } from "./components/TrendChart";
+
+/**
+ * The two props every collapsible panel now takes.
+ *
+ * Open, because these checks are about what a panel renders. The closed case is
+ * asserted separately and deliberately, further down.
+ */
+const panelProps = { open: true, onToggle: () => {} };
 
 const TEST_CATEGORIES = ["Groceries", "Restaurants", "Uncategorised"];
 
@@ -71,6 +87,7 @@ const review = renderToStaticMarkup(
       category: "Groceries",
       description: "spent 42 euros at Lidl yesterday",
       expenseDate: "2026-08-30",
+      dateNote: null,
     }}
     confidence={0.95}
     provider="mock"
@@ -93,7 +110,7 @@ const noAmount = renderToStaticMarkup(
   <SuggestionReview
     suggestion={{
       amount: null, currency: "EUR", merchant: null, category: "Other",
-      description: "coffee", expenseDate: "2026-08-31",
+      description: "coffee", expenseDate: "2026-08-31", dateNote: null,
     }}
     confidence={0.4} provider="mock" saving={false} showCurrency={true}
     categories={TEST_CATEGORIES}
@@ -380,7 +397,7 @@ const listProps = {
   onSaveEdit: () => {},
 };
 const list = renderToStaticMarkup(
-  <RecentExpenses expenses={expenses} total={97} {...listProps} />,
+  <RecentExpenses {...panelProps} expenses={expenses} total={97} {...listProps} />,
 );
 check("list: foreign currency shown", list.includes("30.00 GBP"));
 check("list: euro amount shown", list.includes("35.10"));
@@ -395,7 +412,7 @@ check("list: says how many of how many", list.includes("showing 2 of 97"));
 // must name the parser that actually wrote the sentence, and it must not claim
 // a real provider wrote something the mock produced.
 const idle = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={null}
@@ -417,7 +434,7 @@ check("summary: button invites a first run", idle.includes("Summarise this month
 check("summary: says what the button will do", idle.includes("describe this spending"));
 
 const written = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={{
@@ -447,7 +464,7 @@ check("summary: offers to rewrite once written", written.includes("Write it agai
 // provider that was merely configured — on a fallback those differ, and this is
 // the field that tells the truth about it.
 const byClaude = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={{ provider: "claude", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -465,7 +482,7 @@ check("summary: credits the real provider when it answered", byClaude.includes("
 check("summary: does not also claim the mock", !byClaude.includes("mock"));
 
 const failed = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={null}
@@ -482,7 +499,7 @@ const failed = renderToStaticMarkup(
 check("summary: an error is shown in the card", failed.includes("Could not write a summary"));
 
 const writing = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={null}
@@ -505,7 +522,7 @@ const editable = expenses[0]!;
 check("list: every row offers an edit", (list.match(/>Edit</g) ?? []).length === expenses.length);
 
 const editing = renderToStaticMarkup(
-  <RecentExpenses
+  <RecentExpenses {...panelProps} {...panelProps}
     expenses={expenses}
     total={97}
     {...listProps}
@@ -585,7 +602,7 @@ check("currency: the pie legend follows the base", pieGbp.includes("£500.00"));
 check("currency: the pie legend drops the euro", !pieGbp.includes("€"));
 
 const listGbp = renderToStaticMarkup(
-  <RecentExpenses expenses={expenses} total={97} {...listProps} currency="GBP" />,
+  <RecentExpenses {...panelProps} expenses={expenses} total={97} {...listProps} currency="GBP" />,
 );
 check("currency: the list follows the base", listGbp.includes("£35.10"));
 // The €12.50 row was entered in EUR. With a GBP base that is now a foreign
@@ -620,7 +637,7 @@ check("first visit: cannot be skipped", !/skip|later|dismiss/i.test(choice.repla
 
 // 12. Categories are data, and can be added and removed.
 const withCats = renderToStaticMarkup(
-  <RecentExpenses expenses={expenses} total={97} {...listProps} editingId={expenses[0]!.id} />,
+  <RecentExpenses {...panelProps} expenses={expenses} total={97} {...listProps} editingId={expenses[0]!.id} />,
 );
 check("category box offers the live list, not a compiled-in one", TEST_CATEGORIES.every((name) => withCats.includes(`>${name}</option>`)));
 // The dropdown chooses and nothing else now. Making a category moved to the
@@ -629,7 +646,7 @@ check("category box no longer doubles as a create form", !withCats.includes("+ T
 // The saved category may have been deleted while the form was open. Dropping it
 // silently would change somebody's expense underneath them.
 const orphaned = renderToStaticMarkup(
-  <RecentExpenses
+  <RecentExpenses {...panelProps} {...panelProps}
     expenses={[{ ...expenses[0]!, category: "Deleted thing" }]}
     total={1}
     {...listProps}
@@ -644,7 +661,7 @@ check("deleting is not one click", !list.includes("This cannot be undone"));
 
 // 14. The category manager.
 const manager = renderToStaticMarkup(
-  <CategoryManager
+  <CategoryManager {...panelProps} {...panelProps}
     categories={[
       { name: "Groceries", expenseCount: 28 },
       { name: "Travel", expenseCount: 0 },
@@ -675,7 +692,7 @@ check("manager: offers rename", (manager.match(/>Rename</g) ?? []).length === 2)
 // An expense stores its category as text, so a rename is not just a label
 // change — it rewrites rows. Saying so before it happens is the whole point.
 const renamingFull = renderToStaticMarkup(
-  <CategoryManager
+  <CategoryManager {...panelProps} {...panelProps}
     categories={[{ name: "Groceries", expenseCount: 28 }]}
     uncategorised="Uncategorised"
     busy={false}
@@ -689,24 +706,18 @@ check("manager: a category with expenses shows its count", renamingFull.includes
 
 // 17. The list shows everything, in a box that does not grow the page.
 const wholeList = renderToStaticMarkup(
-  <RecentExpenses expenses={expenses} total={expenses.length} {...listProps} />,
+  <RecentExpenses {...panelProps} expenses={expenses} total={expenses.length} {...listProps} />,
 );
 check("list: says the count plainly when it holds everything", wholeList.includes("2 expenses"));
 check("list: scrolls inside a fixed height", wholeList.includes("max-h-") && wholeList.includes("overflow-y-auto"));
 const partial = renderToStaticMarkup(
-  <RecentExpenses expenses={expenses} total={500} {...listProps} />,
+  <RecentExpenses {...panelProps} expenses={expenses} total={500} {...listProps} />,
 );
 check("list: still says showing N of M when it does not", partial.includes("showing 2 of 500"));
 
 // 18. The day view: one day, as a table.
 const dayFull = renderToStaticMarkup(
-  <DayView
-    date="2026-08-31"
-    expenses={expenses}
-    currency="EUR"
-    loading={false}
-    onDateChange={() => {}}
-  />,
+  <DayView {...panelProps} date="2026-08-31" expenses={expenses} currency="EUR" loading={false} />,
 );
 // en-GB writes this without a comma: "Monday 31 August".
 check("day: names the day in full", dayFull.includes("Monday 31 August"));
@@ -715,14 +726,16 @@ check(
   "day: has the columns a day needs",
   ["What", "Category", "Amount"].every((heading) => dayFull.includes(`>${heading}</th>`)),
 );
-check("day: has a date picker set to the day shown", dayFull.includes('type="date"') && dayFull.includes('value="2026-08-31"'));
+// The picker is gone: the calendar is the only way to choose a day now, and two
+// controls setting the same value would have to be kept in step for no gain.
+check("day: has no date picker of its own", !dayFull.includes('type="date"'));
 check("day: counts what it holds", dayFull.includes("2 expenses"));
 // A column of amounts with no sum is a table asking to be added up by hand.
 check("day: totals the day", dayFull.includes(">Total</td>") && dayFull.includes("47.60"));
 check("day: marks a row that came from elsewhere", dayFull.includes("added by mcp"));
 
 const dayEmpty = renderToStaticMarkup(
-  <DayView date="2026-08-30" expenses={[]} currency="EUR" loading={false} onDateChange={() => {}} />,
+  <DayView {...panelProps} date="2026-08-30" expenses={[]} currency="EUR" loading={false} />,
 );
 check(
   "day: an empty day says so rather than showing an empty table",
@@ -730,9 +743,108 @@ check(
 );
 
 const dayGbp = renderToStaticMarkup(
-  <DayView date="2026-08-31" expenses={expenses} currency="GBP" loading={false} onDateChange={() => {}} />,
+  <DayView {...panelProps} date="2026-08-31" expenses={expenses} currency="GBP" loading={false} />,
 );
 check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.includes("€"));
+
+// 18b. The calendar grid's arithmetic, checked as numbers rather than squares.
+//
+// A grid that puts the 1st in the wrong column is a bug you can otherwise only
+// find by counting cells on a screen. These count them here instead.
+const september = monthGrid("2026-09-01");
+check("grid: is always six full weeks", september.length === 42);
+// 1 September 2026 is a Tuesday, so the grid opens on the Monday before it.
+check("grid: starts on the Monday of the week the 1st falls in", september[0] === "2026-08-31");
+check("grid: runs without a gap", september.every((date, i) => i === 0 || date === addDays(september[i - 1]!, 1)));
+check(
+  "grid: holds every day of the month it names",
+  Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, "0")}`).every((date) =>
+    september.includes(date),
+  ),
+);
+// June 2026 begins on a Monday and has thirty days, so it needs five rows. It
+// still gets six, because a card that changes height as the arrows are pressed
+// is worse than a faint trailing week.
+const june = monthGrid("2026-06-01");
+check("grid: a month that starts on Monday has no leading padding", june[0] === "2026-06-01");
+check("grid: still six weeks when five would do", june.length === 42 && june[41] === "2026-07-12");
+check("grid: knows which cells are the month's own", isInMonth("2026-09-30", "2026-09-01") && !isInMonth("2026-10-01", "2026-09-01"));
+// Stepping across a year boundary is the arithmetic most likely to be wrong.
+check("grid: steps back over new year", shiftMonth("2026-01-01", -1) === "2025-12-01");
+check("grid: steps forward over new year", shiftMonth("2025-12-01", 1) === "2026-01-01");
+check("grid: February 2026 ends on the 28th", endOfMonth("2026-02-01") === "2026-02-28");
+check("grid: a leap February ends on the 29th", endOfMonth("2028-02-01") === "2028-02-29");
+// The API refuses a future date in a filter, so the current month is asked for
+// only as far as today. A past month is asked for whole.
+check(
+  "grid: the current month is only asked for as far as today",
+  monthWindow("2026-09-01", "2026-09-09").to === "2026-09-09",
+);
+check(
+  "grid: a finished month is asked for whole",
+  monthWindow("2026-07-01", "2026-09-09").to === "2026-07-31",
+);
+check("grid: the window always starts on the 1st", monthWindow("2026-09-01", "2026-09-09").from === "2026-09-01");
+
+// 18c. The calendar as drawn.
+const calendarDays = [
+  { date: "2026-09-03", totalBase: "42.60", count: 2 },
+  { date: "2026-09-09", totalBase: "11.00", count: 1 },
+];
+const calendarProps = {
+  month: "2026-09-01",
+  days: calendarDays,
+  today: "2026-09-09",
+  currency: "EUR",
+  loading: false,
+  onMonthChange: () => {},
+  onSelect: () => {},
+};
+const calendar = renderToStaticMarkup(<Calendar {...calendarProps} selected="2026-09-03" />);
+
+check("calendar: names the month it is showing", calendar.includes("September 2026"));
+check("calendar: shows a day's total", calendar.includes("42.60") && calendar.includes("11.00"));
+// A day with nothing in it shows its number and nothing else. Twenty cells
+// reading "€0.00" look like data and bury the days that have something in them.
+check("calendar: an empty day is blank rather than zero", !calendar.includes("0.00</span>") && !calendar.includes("€0.00"));
+check("calendar: has its own month arrows", calendar.includes('aria-label="Previous month"') && calendar.includes('aria-label="Next month"'));
+// Every day of the month is clickable; the days either side are not, so the
+// grid can never take you into a month its heading is not totalling.
+check("calendar: every day of the month is clickable", (calendar.match(/aria-label="2026-09-\d\d"/g) ?? []).length === 30);
+check("calendar: days outside the month are not clickable", !calendar.includes('aria-label="2026-08-31"') && !calendar.includes('aria-label="2026-10-01"'));
+check("calendar: still draws the days either side", calendar.includes(">31</div>") && calendar.includes("aria-hidden"));
+check("calendar: marks the selected day", calendar.includes('aria-current="date"') && (calendar.match(/aria-current="date"/g) ?? []).length === 1);
+check("calendar: weekday headings start on Monday", calendar.indexOf(">Mo</div>") < calendar.indexOf(">Su</div>"));
+
+// The forward arrow stops at the present, the way the period stepper's does.
+//
+// It has to look for the `disabled=""` attribute specifically. Matching on the
+// word "disabled" alone finds it in the button's own class list — every one of
+// these buttons carries `disabled:opacity-30` whether it is disabled or not —
+// so the looser test passed on both, and proved nothing about either.
+const nextMonthDisabled = (html: string) => /aria-label="Next month"[^>]*disabled=""/.test(html);
+
+check("calendar: cannot step into the future", nextMonthDisabled(calendar));
+const pastCalendar = renderToStaticMarkup(
+  <Calendar {...calendarProps} month="2026-07-01" days={[]} selected="2026-09-03" />,
+);
+check("calendar: can step forward from a past month", !nextMonthDisabled(pastCalendar));
+// The selected day stays where it is when the month is stepped away from it.
+// It is a day somebody chose, not a cursor following the view.
+check("calendar: a month with no spending draws no amounts", !/[€£]/.test(pastCalendar));
+check("calendar: nothing is selected when the selected day is elsewhere", !pastCalendar.includes('aria-current="date"'));
+
+const calendarGbp = renderToStaticMarkup(
+  <Calendar {...calendarProps} selected="2026-09-03" currency="GBP" />,
+);
+check("calendar: follows the base currency", calendarGbp.includes("£") && !calendarGbp.includes("€"));
+
+// Two structural guards, in the spirit of the pie's. Nothing here performs
+// layout, so neither can see whether an amount actually fits — they assert the
+// two decisions that stop seven columns from crushing their contents on a phone,
+// which is the failure the pie legend already had once.
+check("calendar: the grid scrolls rather than the page", calendar.includes("overflow-x-auto"));
+check("calendar: a cell cannot be squeezed below an amount's width", calendar.includes("min-w-["));
 
 // 19. A re-run of the summary is visible even when the words are identical.
 //
@@ -740,7 +852,7 @@ check("day: follows the base currency", dayGbp.includes("£") && !dayGbp.include
 // parser is deterministic, so a second press returned the same sentence and
 // nothing on the card changed. These assert the two things that now differ.
 const rerunning = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -758,7 +870,7 @@ check("summary: a re-run replaces the sentence while it works", rerunning.includ
 check("summary: the old sentence is not left sitting there", !rerunning.includes("A sentence."));
 
 const reWritten = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     selection={{ kind: "period", period: "month", offset: 0 }}
     onSelectionChange={() => {}}
     summary={{ provider: "mock", saved: false, month: "2026-08-01", from: "2026-08-01", to: "2026-08-31", summary: "A sentence." }}
@@ -849,7 +961,7 @@ const cardProps = {
   onAsk: () => {},
 };
 
-const askIdle = renderToStaticMarkup(<AnalysisCard {...cardProps} answer={null} />);
+const askIdle = renderToStaticMarkup(<AnalysisCard {...panelProps} {...cardProps} answer={null} />);
 check("ask: the box is there", askIdle.includes("Ask about your spending"));
 // The placeholder has to read as a question, because the add box at the top of
 // the page also takes a sentence and that is this feature's one real hazard.
@@ -866,7 +978,7 @@ const primaryButtons = (askIdle.match(/class="[^"]*(?<![-\w])bg-accent(?![-\w])[
 check("ask: the box has no primary button of its own", primaryButtons === 1, String(primaryButtons));
 
 const answered = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     {...cardProps}
     answer={{
       provider: "mock",
@@ -884,7 +996,7 @@ check("ask: the answer is shown", answered.includes("Booking.com"));
 check("ask: how the question was read is shown", answered.includes("read as:"));
 
 const refused = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     {...cardProps}
     answer={{
       provider: "mock",
@@ -900,7 +1012,7 @@ check("ask: a refusal is shown plainly", refused.includes("I can only look up wh
 check("ask: a refusal carries no reading", !refused.includes("read as:"));
 
 const signposted = renderToStaticMarkup(
-  <AnalysisCard
+  <AnalysisCard {...panelProps} {...panelProps}
     {...cardProps}
     answer={{
       provider: "mock",
@@ -1116,3 +1228,378 @@ check("card: a custom range says why there is no comparison", customCards.includ
 check("card: a custom range shows no percentage", !/\d+%/.test(customCards));
 check("card: the three silences all read differently", !customCards.includes("Nothing recorded in") && !customCards.includes("Too little in"));
 check("card: a stepped window is named in the cards", customCards.includes("Spent from 1 Jun to 15 Jul 2026"));
+
+// 24. The collapsible panels.
+//
+// A closed panel is a labelled strip, not a blank box: the header stays, and it
+// carries a summary of what is inside. That is the whole answer to the objection
+// to remembering the state across visits.
+const closedDay = renderToStaticMarkup(
+  <DayView
+    date="2026-08-31"
+    expenses={expenses}
+    currency="EUR"
+    loading={false}
+    open={false}
+    onToggle={() => {}}
+  />,
+);
+check("panel: a closed panel still names itself", closedDay.includes("Monday 31 August"));
+check("panel: a closed panel says what is inside", closedDay.includes("2 expenses"));
+// The one number somebody folding the day away is most likely to want back.
+check("panel: a closed day still shows its total", closedDay.includes("47.60"));
+check("panel: a closed panel drops its body", !closedDay.includes("<table"));
+check("panel: the toggle says whether it is open", closedDay.includes('aria-expanded="false"'));
+check("panel: an open panel says so too", dayFull.includes('aria-expanded="true"'));
+// Unmounted rather than hidden, so a closed panel is not holding a half-typed
+// question or an open row editor waiting to reappear. The body is the one element
+// carrying an id, which the toggle names in aria-controls — present when open,
+// absent when closed. Searching for the word "hidden" was the obvious test and a
+// useless one: the chevron carries aria-hidden either way, so it passed on both.
+check("panel: the body is unmounted, not hidden", !closedDay.includes("<div id=") && dayFull.includes("<div id="));
+
+const closedCategories = renderToStaticMarkup(
+  <CategoryManager
+    categories={[{ name: "Groceries", expenseCount: 4 }, { name: "Bills", expenseCount: 2 }]}
+    uncategorised="Uncategorised"
+    busy={false}
+    error={null}
+    onAdd={() => {}}
+    onRename={() => {}}
+    onDelete={() => {}}
+    open={false}
+    onToggle={() => {}}
+  />,
+);
+check("panel: a closed categories panel counts them", closedCategories.includes("2 categories"));
+check("panel: a closed categories panel has no add box", !closedCategories.includes('placeholder="'));
+
+// The one that matters most. The period dropdown governs every number on the
+// page, so it has to survive its own panel being folded away — a global control
+// that hides itself is a bad control.
+const closedAnalysis = renderToStaticMarkup(
+  <AnalysisCard
+    selection={{ kind: "period", period: "month", offset: 0 }}
+    onSelectionChange={() => {}}
+    summary={null}
+    writtenAt={null}
+    loading={false}
+    error={null}
+    onRequest={() => {}}
+    answer={null}
+    asking={false}
+    askError={null}
+    onAsk={() => {}}
+    open={false}
+    onToggle={() => {}}
+  />,
+);
+check(
+  "panel: a closed analysis card keeps its period control",
+  closedAnalysis.includes('aria-label="Previous period"') && closedAnalysis.includes("This month"),
+);
+check("panel: a closed analysis card keeps its Summarise button", closedAnalysis.includes("Summarise"));
+check("panel: a closed analysis card drops its question box", !closedAnalysis.includes("Ask about your spending"));
+
+// 25. What is remembered, and what happens when it is nonsense.
+//
+// `localStorage` is a boundary like any other: the value there was written by an
+// older version of this code, or by somebody with the developer tools open.
+function withStorage(value: string | null, run: () => Set<PanelId>): Set<PanelId> {
+  const store = {
+    getItem: () => value,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+    key: () => null,
+    length: 0,
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: store, configurable: true });
+  try {
+    return run();
+  } finally {
+    Reflect.deleteProperty(globalThis, "localStorage");
+  }
+}
+
+const fresh = withStorage(null, readCollapsed);
+check("panels: a first visit closes only the categories panel", fresh.size === 1 && fresh.has("categories"));
+check(
+  "panels: everything a first-time visitor would read is open",
+  !fresh.has("analysis") && !fresh.has("day") && !fresh.has("recent"),
+);
+
+const remembered = withStorage('["recent","day"]', readCollapsed);
+check("panels: a stored list is honoured", remembered.has("recent") && remembered.has("day"));
+check("panels: and it replaces the defaults rather than adding to them", !remembered.has("categories"));
+
+// A panel that no longer exists is forgotten, not treated as an error — otherwise
+// renaming one later would reset everybody's layout instead of one line of it.
+const withGhost = withStorage('["recent","a-panel-that-was-removed"]', readCollapsed);
+check("panels: an unknown id is ignored, not fatal", withGhost.size === 1 && withGhost.has("recent"));
+
+for (const [label, stored] of [
+  ["not JSON at all", "{{{"],
+  ["JSON of the wrong shape", '{"recent":true}'],
+  ["a list of the wrong type", "[1,2,3]"],
+] as const) {
+  const recovered = withStorage(stored, readCollapsed);
+  const isDefault = recovered.size === 1 && recovered.has("categories");
+  // A list of numbers parses as an array and then filters down to nothing, which
+  // is an empty set rather than the defaults — every panel open. Both outcomes
+  // are safe; neither throws, which is the property being asserted.
+  check(`panels: ${label} does not break the page`, isDefault || recovered.size === 0);
+}
+
+// 26. The layout, as far as a string can show it.
+//
+// Structural guards, like the pie's. Nothing here performs layout, so these
+// assert the decisions rather than the result.
+check("layout: the page is wide enough to be split", app.includes("max-w-7xl"));
+
+// These read the source rather than the markup, which needs saying. The columns
+// live inside the branch that renders once the data has loaded, and rendering
+// App here reaches no backend — so the string this produces is the loading state
+// and contains no grid at all. Reading the file asserts the decision, which is
+// all a structural guard was ever doing.
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+// Two columns at 1024px would give a 587px wide column, under the calendar
+// grid's 640px floor — a card getting narrower as the window gets wider, which
+// is the bug that took the pie legend down to one letter per category.
+check("layout: the split starts at xl, not lg", appSource.includes("xl:grid-cols-3") && !appSource.includes("lg:grid-cols-2"));
+check("layout: the wide column spans two of the three", appSource.includes("xl:col-span-2"));
+// A grid item refuses by default to shrink below its contents, which would let
+// the calendar's own minimum width push its column past its share.
+check("layout: the columns are allowed to shrink", appSource.includes("min-w-0"));
+check("layout: spacing came down with the width", app.includes("space-y-6") && !app.includes("space-y-10"));
+
+// 27. A date the parser was given and could not read.
+//
+// The failure this whole path exists for. Falling back to today produced a date
+// that looked exactly as deliberate as a correct one, on the one screen whose
+// job is to be scanned for things that are wrong.
+
+/** The submit button's own tag, so "is saving blocked" can be asked precisely. */
+function saveButton(html: string): string {
+  const found = html.match(/<button type="submit"[^>]*>/);
+  if (!found) throw new Error("no save button");
+  return found[0];
+}
+
+/**
+ * The amount input's own tag.
+ *
+ * Named the same way as the other two, and for the reason those exist: asking
+ * whether the whole page contains "24.90" answers a different question from
+ * asking what is in the amount box. The first draft of the receipt checks did
+ * the former and proved nothing — a regex matching `placeholder="0.00"` is
+ * satisfied by the input merely existing, whatever is in it.
+ */
+function amountInput(html: string): string {
+  const found = html.match(/<input[^>]*placeholder="0\.00"[^>]*>/);
+  if (!found) throw new Error("no amount input");
+  return found[0];
+}
+
+/** The date input's own tag, for the same reason. */
+function dateInput(html: string): string {
+  const found = html.match(/<input type="date"[^>]*>/);
+  if (!found) throw new Error("no date input");
+  return found[0];
+}
+
+const unreadableDate = renderToStaticMarkup(
+  <SuggestionReview
+    suggestion={{
+      amount: 53,
+      currency: "EUR",
+      merchant: "Uniqlo",
+      category: "Shopping",
+      description: "53 euros for clothes at uniqlo on 31 february",
+      expenseDate: null,
+      dateNote: "\u201C31 february\u201D is not a real date.",
+    }}
+    confidence={0.7}
+    provider="mock"
+    saving={false}
+    showCurrency={true}
+    categories={TEST_CATEGORIES}
+    onSave={() => {}}
+    onCancel={() => {}}
+  />,
+);
+
+check("date: the note quotes the text that failed", unreadableDate.includes("31 february"));
+check("date: the note says what was wrong with it", unreadableDate.includes("is not a real date"));
+check("date: and says what to do about it", unreadableDate.includes("Pick the right one before saving"));
+// Stated as a problem rather than as a hint. A missing amount is the parser
+// finding nothing; this is the parser finding something and not understanding
+// it, which is worth the stronger register.
+check("date: the note reads as an error, not a hint", unreadableDate.includes("bg-red-50"));
+// The empty box is the part that cannot be scanned past.
+check("date: the box is left empty", dateInput(unreadableDate).includes('value=""'), dateInput(unreadableDate));
+check("date: the box is marked as needing an answer", dateInput(unreadableDate).includes('aria-invalid="true"'));
+check("date: the cursor is put in it", dateInput(unreadableDate).includes("autofocus"));
+check("date: saving is blocked until it is filled in", saveButton(unreadableDate).includes('disabled=""'), saveButton(unreadableDate));
+// The rest of the sentence was still read. A date it could not manage does not
+// throw away the work it did on everything else.
+check("date: the other fields survive", unreadableDate.includes("53") && unreadableDate.includes("Uniqlo"));
+
+// The ordinary case has to stay ordinary: no note, nothing flagged, saving
+// available immediately. A sentence with no date in it gets today, quietly,
+// and that is correct rather than a failure.
+const plainDate = renderToStaticMarkup(
+  <SuggestionReview
+    suggestion={{
+      amount: 42,
+      currency: "EUR",
+      merchant: "Lidl",
+      category: "Groceries",
+      description: "42 euros at lidl",
+      expenseDate: "2026-09-10",
+      dateNote: null,
+    }}
+    confidence={0.8}
+    provider="mock"
+    saving={false}
+    showCurrency={true}
+    categories={TEST_CATEGORIES}
+    onSave={() => {}}
+    onCancel={() => {}}
+  />,
+);
+check("date: a sentence with no date in it says nothing about dates", !plainDate.includes("Pick the right one"));
+check("date: and is not flagged", !dateInput(plainDate).includes("aria-invalid"));
+check("date: and shows the date it chose", dateInput(plainDate).includes('value="2026-09-10"'));
+check("date: and can be saved straight away", !saveButton(plainDate).includes('disabled=""'), saveButton(plainDate));
+
+// 28. A scanned receipt, and what the confirm step does with each verdict.
+//
+// This is the coverage that matters most in this file. The OCR itself cannot be
+// exercised here — jsdom has no Worker, no canvas and no File — but what the
+// interface *does* with a total it does not trust is exactly the thing a string
+// render can see, and it is the thing the whole feature turns on.
+
+const RECEIPT_WORDS = [
+  { text: "K-MARKET", left: 40, top: 20, width: 200, height: 30 },
+  { text: "04.09.2026", left: 40, top: 70, width: 160, height: 24 },
+  { text: "Maito", left: 40, top: 140, width: 90, height: 22 },
+  { text: "1,29", left: 300, top: 140, width: 60, height: 22 },
+  { text: "YHTEENSA", left: 40, top: 200, width: 150, height: 24 },
+  { text: "24,90", left: 300, top: 200, width: 70, height: 24 },
+];
+
+function receiptWith(verdict: TotalVerdict): ReceiptData {
+  return {
+    merchant: "K-MARKET",
+    date: "2026-09-04",
+    total: verdict.kind === "corroborated" || verdict.kind === "unverified" ? verdict.total : null,
+    currency: "EUR",
+    vat: null,
+    items: [{ description: "Maito", amount: 1.29 }],
+    sources: { merchant: "K-MARKET", date: "04.09.2026", total: "24,90" },
+    verdict,
+    confidence: 0.8,
+  };
+}
+
+function renderReceipt(verdict: TotalVerdict) {
+  const receipt = receiptWith(verdict);
+  return renderToStaticMarkup(
+    <ReceiptReview
+      receipt={receipt}
+      suggestion={{
+        amount: receipt.total,
+        currency: "EUR",
+        merchant: "K-MARKET",
+        category: "Groceries",
+        description: "Maito",
+        expenseDate: "2026-09-04",
+        dateNote: null,
+      }}
+      words={RECEIPT_WORDS}
+      imageUrl="blob:fake"
+      imageWidth={400}
+      imageHeight={300}
+      saving={false}
+      showCurrency={true}
+      categories={TEST_CATEGORIES}
+      onSave={() => {}}
+      onDiscard={() => {}}
+    />,
+  );
+}
+
+const corroborated = renderReceipt({
+  kind: "corroborated",
+  total: 24.9,
+  by: "the lines on it agree: they add up to 24.90",
+});
+const unverified = renderReceipt({
+  kind: "unverified",
+  total: 24.9,
+  why: "Nothing else on this receipt confirms it.",
+});
+const contradicted = renderReceipt({
+  kind: "contradicted",
+  read: 2490,
+  suggested: 24.9,
+  problem: "the lines on it disagree — they add up to 24.90",
+});
+const absent = renderReceipt({ kind: "absent", why: "No line on this receipt said what the total was." });
+
+check("receipt: the photo is shown beside the values", corroborated.includes("blob:fake"));
+check("receipt: it says the photo is not uploaded", corroborated.includes("never uploaded"));
+
+// A checked total is filled in and says what checked it.
+check("receipt: a corroborated total is filled in", amountInput(corroborated).includes('value="24.9"'), amountInput(corroborated));
+check("receipt: and says what corroborated it", corroborated.includes("Checked") && corroborated.includes("add up to"));
+check("receipt: and can be saved straight away", !saveButton(corroborated).includes('disabled=""'));
+
+// "We read a number" is not "we checked a number", and they must not look alike.
+check("receipt: an unverified total is filled in too", amountInput(unverified).includes('value="24.9"'));
+check("receipt: but says it was not checked", unverified.includes("Not checked"));
+check(
+  "receipt: and does not look like a checked one",
+  unverified.includes("bg-amber-50") && !unverified.includes("Checked —"),
+);
+
+// The one this whole feature exists for. A wrong total that looks right is
+// caught by arithmetic, and then the box is left EMPTY rather than tinted,
+// because a filled-in field gets approved at a glance whatever colour it is.
+check(
+  "receipt: a contradicted total leaves the amount empty",
+  amountInput(contradicted).includes('value=""'),
+  amountInput(contradicted),
+);
+check("receipt: an absent total leaves it empty too", amountInput(absent).includes('value=""'));
+check("receipt: saving is blocked until it is settled", saveButton(contradicted).includes('disabled=""'));
+check("receipt: it says what disagreed", contradicted.includes("they add up to 24.90"));
+check("receipt: it reads as an error", contradicted.includes("bg-red-50"));
+
+// Both readings offered, neither preselected.
+check("receipt: it offers what the arithmetic says", contradicted.includes("Use 24.90"));
+check("receipt: and what was printed", contradicted.includes("Use 2490.00"));
+check("receipt: neither is chosen for you", amountInput(contradicted).includes('value=""'));
+
+// The total is marked red on the photo when it is the thing being questioned,
+// so the eye goes to the receipt rather than to the fields.
+check("receipt: the total is marked on the photo", corroborated.includes('data-marked="Total"'));
+check("receipt: and marked as doubted when it is doubted", contradicted.includes("ring-red-500"));
+check("receipt: the date and shop are marked too", corroborated.includes('data-marked="Date"') && corroborated.includes('data-marked="Shop"'));
+
+// No total at all is a different failure from a wrong one, and says so.
+check("receipt: an absent total says so", absent.includes("No line on this receipt"));
+check("receipt: and also blocks saving", saveButton(absent).includes('disabled=""'));
+
+// The lines are the evidence behind the verdict, so they are available to look at.
+check("receipt: the lines read off it can be seen", corroborated.includes("1 line read from the receipt"));
+
+// The scan button is a secondary action: "Read this" stays the one primary.
+const scanner = renderToStaticMarkup(<ReceiptScanner busy={false} onRead={() => {}} />);
+check("receipt: there is a scan action", scanner.includes("Scan receipt"));
+check("receipt: it is not a second primary button", !scanner.includes("bg-accent px-5"));
+check("receipt: it takes a photo directly on a phone", scanner.includes('capture="environment"'));
+check("receipt: it accepts images only", scanner.includes('accept="image/*"'));
+const busyScanner = renderToStaticMarkup(<ReceiptScanner busy={true} onRead={() => {}} />);
+check("receipt: it stands down while something else is mid-flight", busyScanner.includes("disabled"));
