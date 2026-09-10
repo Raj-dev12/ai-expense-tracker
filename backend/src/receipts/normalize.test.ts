@@ -536,3 +536,54 @@ describe("compound keywords", () => {
     assert.equal(receipt.total, 9.9);
   });
 });
+
+/**
+ * The quantity line a receipt prints under a multi-buy item.
+ *
+ * "3 x 0,45" explains the line above it — three at forty-five cents — and its
+ * money is already counted there. Adding it as a purchase counts it twice, which
+ * pushed a real Lidl receipt's item sum to 14,44 against a correct total of
+ * 13,62. A sum *exceeding* the total is treated as strong evidence the total is
+ * too small, so the double count was being fed into the check that trusts it
+ * most, and a correct total was blanked.
+ */
+describe("multi-buy quantity lines", () => {
+  it("does not count the unit-price line as something bought", () => {
+    const receipt = normalizeReceipt(
+      ["LIDL", "Ruispala 100 % 1,35", "3 x 0,45 EUR", "Avokado 700g 2,49", "YHTEENSÄ 3,84"],
+      TODAY,
+    );
+    assert.equal(receipt.items.length, 2);
+    assert.equal(receipt.verdict.kind, "corroborated");
+    assert.equal(receipt.total, 3.84);
+  });
+
+  it("survives the damage OCR does to that line", () => {
+    // Every one of these came off a real photograph of the same receipt.
+    for (const line of ["3 x 0,45 EUR", "3 x 0,45 — EUR", "3 x 0,45. EUR |", "3 x 0,45 EWR", "9 x 0,45. EUR"]) {
+      const receipt = normalizeReceipt(["LIDL", "Ruispala 1,35", line, "YHTEENSÄ 1,35"], TODAY);
+      assert.equal(receipt.items.length, 1, line);
+      assert.equal(receipt.total, 1.35, line);
+    }
+  });
+
+  it("leaves an item that states its own quantity inline alone", () => {
+    // "Omena 3 x 0,45 1,35" begins with the product and ends with the real
+    // amount. Only a line that *starts* with the quantity is a breakdown.
+    const receipt = normalizeReceipt(["KAUPPA", "Omena 3 x 0,45 1,35", "YHTEENSÄ 1,35"], TODAY);
+    assert.equal(receipt.items.length, 1);
+    assert.equal(receipt.verdict.kind, "corroborated");
+  });
+
+  it("does not treat the excluded line as a missing amount", () => {
+    // Its money is not absent from the sum, it is already in the line above.
+    // Counting it as unaccounted would weaken the items check on exactly the
+    // receipts where it is working — so a wrong total here must still be caught.
+    const receipt = normalizeReceipt(
+      ["LIDL", "Ruispala 100 % 1,35", "3 x 0,45 EUR", "Avokado 700g 2,49", "YHTEENSÄ 9,99"],
+      TODAY,
+    );
+    assert.equal(receipt.verdict.kind, "contradicted");
+    assert.equal(receipt.total, null);
+  });
+});

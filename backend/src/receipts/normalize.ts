@@ -235,6 +235,25 @@ export function findVat(lines: string[]): MoneyToken | null {
 }
 
 /**
+ * The quantity breakdown a receipt prints under a multi-buy line.
+ *
+ * "3 x 0,45" sits below "Ruispala 100 % 1,35" and explains it: three at
+ * forty-five cents. The money is already in the line above, so counting this as a
+ * purchase adds it twice.
+ *
+ * That is not a rounding-sized error. It pushed a Lidl receipt's item sum to
+ * 14,44 against a correct total of 13,62 — and since a sum *exceeding* the total
+ * is treated as strong evidence that the total is too small, the reading was
+ * contradicted and a correct total blanked. The one shape of mistake that most
+ * needed excluding was being fed into the check that trusts it most.
+ *
+ * Anchored at the start, because that is where the quantity sits on its own line.
+ * An item that states its own quantity inline — "Omena 3 x 0,45 1,35" — begins
+ * with the product and ends with the real amount, and is left alone.
+ */
+const UNIT_PRICE_LINE = /^\d{1,3}\s*(?:kpl|kg|st|pcs)?\s*[x*×]\s*\d+[.,]\d{2}/i;
+
+/**
  * The things bought.
  *
  * A line qualifies when it has an amount, has words beside it, and says nothing
@@ -270,6 +289,12 @@ export function findItems(lines: string[]): {
   for (const [index, line] of lines.entries()) {
     if (lineHasKeyword(line, DISCOUNT_WORDS)) hadDiscountLine = true;
     if (lineHasKeyword(line, NOT_AN_ITEM_WORDS)) continue;
+
+    // Not counted, and deliberately not counted as *unaccounted* either: this
+    // money is not missing from the sum, it is already in the line above. Marking
+    // it missing would weaken the items check on exactly the receipts where it is
+    // working correctly.
+    if (UNIT_PRICE_LINE.test(line)) continue;
 
     // A bare amount sitting under a label belongs to that label, not to the
     // basket. Without this, a total that wrapped onto its own line would be

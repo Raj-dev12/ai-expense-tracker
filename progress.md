@@ -868,14 +868,52 @@ breakdown, and excluding it is small and self-contained.
 
 Not built. It is a second change to the same measurement, and attributing effects to one change
 at a time has been the whole method here.
+
+### The multi-buy sub-line, as its own change
+
+`3 x 0,45` sits under `Ruispala 100 % 1,35` and explains it — three at forty-five cents. Its
+money is already in the line above, so counting it as a purchase counts it twice.
+
+- [x] Excluded, anchored at the start of the line. An item stating its quantity inline —
+      `Omena 3 x 0,45 1,35` — begins with the product and ends with the real amount, and is left
+      alone
+- [x] Deliberately *not* counted as an unaccounted amount. Its money is not missing from the sum,
+      it is already there, and marking it missing would weaken the items check on exactly the
+      receipts where that check is working
+- [x] The pattern survives what OCR does to that line. All of these came off real photographs of
+      the same receipt: `3 x 0,45 EUR`, `3 x 0,45 — EUR`, `3 x 0,45. EUR |`, `3 x 0,45 EWR`,
+      `9 x 0,45. EUR`
+
+Measured on its own, against the same twenty runs:
+
+```
+7 of 20 runs affected, 7 lines excluded, 3,15 of double-counted money removed
+
+              before          after
+correct         11              11
+shown           10              10
+silent wrong     0               0
+```
+
+**The change is right and it moved nothing.** `flat-01` was the case that prompted it, and after
+the double count is removed its item sum is still 13,99 against a total of 13,62 — because the
+same photograph also read `1,35` as `1,95` and `1,75` as `1.52`. One error was removed and two
+remain. Recorded as it happened rather than as a win.
+
+It exposed the known hole in the direction rule: "OCR drops amounts, it does not invent them"
+holds for omission and fails for a misread digit, which inflates a sum without any line being
+invented. Left alone — tightening it is what keeps 24,90-read-as-21,90 caught, and trading a
+false contradiction for a silent wrong answer is the wrong direction.
+
+321 backend tests, 367 render checks, both typecheck clean.
 ### Next
 
 - [x] Labelled photos from the four buckets, and a baseline run recorded
 - [x] Settled: not the pixels, not the layout — the item sums, and the checks trusting them
 - [ ] Sauvola and perspective correction: parked. The totals are being read; small dense item
       prices are the bottleneck, and neither technique meaningfully helps those
-- [ ] Decide on the `3 x 0,45` quantity sub-line being counted as a purchase — found while
-      measuring, small and self-contained, deliberately not built yet
+- [x] The `3 x 0,45` quantity sub-line no longer counted as a purchase — correct, and it moved
+      none of the measured numbers
 - [ ] The escalation in `tesseract.ts`, once the grid says which variant is worth escalating to
 - [ ] `ReceiptDiagnostics` to name which preparation produced the reading on show, and list what
       was tried and rejected. The panel keeps showing the prepared image of the winning attempt,
