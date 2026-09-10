@@ -1287,6 +1287,11 @@ want when someone asks you about the project in six months.
 | An item's amount must have cents | "5" on a line with words is not a price | Found by an address: "Itämerenkatu 21, Helsinki" was read as a twenty-one euro purchase, which then contradicted a total that was perfectly correct. A receipt prints "5,00", never "5". A genuine whole-euro item is missed, and that is the safe direction — the sum then disagrees and a person is asked, rather than a wrong sum quietly confirming a wrong total. |
 | A discount makes a mismatch inconclusive, not wrong | Lines summing to *more* than the total is what a discount looks like | OCR rarely preserves a minus sign well enough to add discounts in with a negative value, so they are excluded and merely noticed. Lines summing to *less* than the total is money nothing accounts for and stays a disagreement either way. |
 | The boxes on the photo are elements, not a canvas | Positioned as a percentage of the image | A canvas needs the displayed size, so it needs redrawing on every resize and zoom, and produces nothing a check outside a browser can see. Percentage-positioned elements scale themselves and are ordinary markup, so the checks can assert the total really was marked without a browser being involved. |
+| The photo is prepared before OCR sees it | Orientation, downscale, grey, contrast stretch | There was no preprocessing at all — the file went straight into the recogniser, which is the hardest possible version of the task. A phone photo arrives rotated by a tag a canvas need not honour, and at four thousand pixels across; the same receipt read on a desktop and returned nothing at all on a phone. Standard practice for receipt scanning, and its absence was the likeliest single cause of the mobile failure. |
+| The prepared canvas is displayed, not the original photo | The confirm step shows what the reader saw | The word positions come back in the prepared image's coordinates, so showing the original would let the boxes drift from the pixels under them — by a quarter turn, once orientation is corrected. Showing what was actually read also means a scan that went wrong explains itself. |
+| Grey, not black and white | Contrast stretched, thresholding left to Tesseract | Tesseract binarises internally and does it better from grey than from something already reduced to two values. Preprocessing should make the letters separable, not make the decision. |
+| A blank total says which kind of blank it is | "No total found" against "read as 2490.00, and that looks wrong" | Both leave the box empty, which is right, and both were reported as indistinguishable, which was fair — the difference was buried in a sentence. They ask different things of the person: go and find the figure, or adjudicate between two of them. The kind now leads, and is repeated beside the box, because the box is where the eye is when it is empty. |
+| The shop name is trimmed at the ends only | Marks inside a name are kept | A logo, a border or a torn edge at the top of a receipt reports as text, and arrived as symbols wrapped round the name. But "K-MARKET" flattened to "KMARKET" would look correct and be wrong, which is worse than a stray character somebody can see and delete. |
 | Every core variant is vendored, not the one that was observed | All six, ~31 MB | Tesseract chooses at runtime between relaxed SIMD, SIMD and plain builds on what the browser supports, so the file it asks for is not knowable from one machine. Five were shipped, the browser asked for the sixth, and OCR never started. The required list is now read out of tesseract.js's own source by a check, so it cannot drift from what the library actually requests. |
 | Tesseract assets are self-hosted | ~31 MB in `frontend/public/tesseract/` | A CDN would keep the repository small and make scanning quietly dependent on a third party being reachable — offline or behind a restrictive network it would stop working with no way to tell why from inside the app. Both language files are shipped because the Finnish ones earn their size on YHTEENSÄ, ALV and the ä in a shop's name. |
 | tesseract.js, loaded on demand | The dependency, and why | It is the only WebAssembly OCR engine that runs in a browser with no service behind it, which the no-API-key rule requires. The alternative considered was a vision model, which would have been more accurate and needed a key and a paid service — it stays available as a second `ReceiptExtractor`, behind the same interface. Imported with a dynamic `import()` so several megabytes stay out of the first paint. |
@@ -3364,6 +3369,23 @@ It misses a genuine whole-euro item, and that is the safe direction: the sum the
 the total and a person is asked, rather than a wrong sum quietly confirming a wrong total. Worth
 noticing that the failure was in the direction the design wants — a false alarm, not a silent
 acceptance.
+
+**No preprocessing at all, which was never a decision**
+
+Tested on a phone, the same receipt that read poorly on a desktop returned no text whatsoever.
+Asked directly whether the pipeline did any preprocessing before OCR, the answer was no: the
+`File` went from the file input into `recognize()` untouched. No orientation handling, no
+downscaling, no greyscale, no contrast.
+
+That was never decided. It was the shortest path from "Tesseract accepts a File" to something
+that worked on the one image it was tried on, and it survived because it *did* work there. A
+desktop screenshot is upright, modest in size and high contrast. A phone photo of a thermal
+receipt is none of those.
+
+Worth naming as a pattern: **the absence of a step is invisible in a way a wrong step is not.**
+Nothing in the code said "no preprocessing"; there was simply nothing there, and nothing there
+looks the same as nothing needed. A wrong choice can be read and argued with. A missing one has
+to be asked about, which is what happened.
 
 **A verification that tested my own list instead of the requirement**
 

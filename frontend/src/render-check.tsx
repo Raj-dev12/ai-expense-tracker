@@ -1553,15 +1553,15 @@ check("receipt: it says the photo is not uploaded", corroborated.includes("never
 
 // A checked total is filled in and says what checked it.
 check("receipt: a corroborated total is filled in", amountInput(corroborated).includes('value="24.9"'), amountInput(corroborated));
-check("receipt: and says what corroborated it", corroborated.includes("Checked") && corroborated.includes("add up to"));
+check("receipt: and says what corroborated it", corroborated.includes("Total checked") && corroborated.includes("add up to"));
 check("receipt: and can be saved straight away", !saveButton(corroborated).includes('disabled=""'));
 
 // "We read a number" is not "we checked a number", and they must not look alike.
 check("receipt: an unverified total is filled in too", amountInput(unverified).includes('value="24.9"'));
-check("receipt: but says it was not checked", unverified.includes("Not checked"));
+check("receipt: but says it was not checked", unverified.includes("Total not checked"));
 check(
   "receipt: and does not look like a checked one",
-  unverified.includes("bg-amber-50") && !unverified.includes("Checked —"),
+  unverified.includes("bg-amber-50") && !unverified.includes("Total checked"),
 );
 
 // The one this whole feature exists for. A wrong total that looks right is
@@ -1755,3 +1755,62 @@ check(
   "scanner: no total found is not treated as a failure",
   !scannerSource.includes("no-total") && absent.includes("No line on this receipt"),
 );
+
+// 31. The two blank-total cases, told apart.
+//
+// Both leave the amount box empty, which is right, and both were reported as
+// indistinguishable, which was fair: the difference was buried in a sentence.
+// "Nothing on the page said what the total was" and "something did and the
+// arithmetic disagrees" ask different things of the person reading — go and find
+// the figure, or adjudicate between two of them.
+check("blank: a missing total leads with what happened", absent.includes("No total found"));
+check("blank: a disputed total leads with what happened", contradicted.includes("and that looks wrong"));
+check("blank: and names the figure it distrusts", contradicted.includes("Total read as 2490.00"));
+check(
+  "blank: the two headings are not the same",
+  absent.includes("No total found") && !absent.includes("looks wrong"),
+);
+
+// Repeated beside the box itself, not only in the banner at the top, because the
+// box is where the eye is when it is empty.
+check("blank: a missing total says why the box is empty", absent.includes("no total was found on the receipt at all"));
+check("blank: a disputed total says why the box is empty", contradicted.includes("Left blank on purpose"));
+check(
+  "blank: and those two sentences differ",
+  !absent.includes("Left blank on purpose") && !contradicted.includes("no total was found on the receipt at all"),
+);
+
+// 32. The photo is prepared before it is read.
+//
+// There was no preprocessing at all: the file went straight into the recogniser.
+// A phone photo arrives rotated by an EXIF tag a canvas need not honour, and at
+// four thousand pixels across — which is how the same receipt read on a desktop
+// and returned nothing at all on a phone.
+const prepareSource = readFileSync(new URL("./receipts/prepare.ts", import.meta.url), "utf8");
+const pipelineSource = readFileSync(new URL("./receipts/tesseract.ts", import.meta.url), "utf8");
+
+check("prepare: EXIF orientation is applied", prepareSource.includes('imageOrientation: "from-image"'));
+check("prepare: the image is scaled down", prepareSource.includes("MAX_EDGE") && prepareSource.includes("Math.min(1, MAX_EDGE"));
+check("prepare: it is never scaled up", prepareSource.includes("Math.min(1, MAX_EDGE"));
+check("prepare: it is converted to grey", prepareSource.includes("0.299") && prepareSource.includes("0.587"));
+check("prepare: the contrast is stretched", prepareSource.includes("lookup") && prepareSource.includes("CLIP"));
+// Extremes are ignored so a glare spot cannot define white on its own.
+check("prepare: glare and folds do not set the range", prepareSource.includes("const CLIP"));
+
+check("prepare: the pipeline actually uses it", pipelineSource.includes("prepareForOcr"));
+// The word boxes come back in the prepared canvas's coordinates, so the confirm
+// step has to show that canvas — anything else and the boxes drift, by ninety
+// degrees after an orientation fix.
+check("prepare: the prepared canvas is what gets read", pipelineSource.includes("worker.recognize(canvas"));
+check("prepare: and what gets shown", pipelineSource.includes("url: imageUrl } = prepared"));
+check("prepare: the wait is named for a person", scannerSource.includes("Preparing the photo"));
+
+// 33. OCR debris is stripped off the shop name.
+const normalizeSource = readFileSync(
+  new URL("../../backend/src/receipts/normalize.ts", import.meta.url),
+  "utf8",
+);
+check("merchant: stray marks are cleaned off the name", normalizeSource.includes("function tidyName"));
+// But only off the ends. "K-MARKET" mangled into "KMARKET" would look correct
+// and be wrong, which is worse than a stray character somebody can see.
+check("merchant: marks inside a name are kept", normalizeSource.includes("does not strip marks from the middle"));

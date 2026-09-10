@@ -39,25 +39,50 @@ import { ReceiptImage } from "./ReceiptImage";
  * identically states the first as though it were the second.
  */
 
-function verdictLabel(verdict: TotalVerdict): { text: string; className: string } {
+/**
+ * What to say about the total, led by *which kind* of thing happened.
+ *
+ * The heading is separate from the explanation because the two blank cases were
+ * reported as indistinguishable. They both leave the amount box empty, and the
+ * difference between them was buried in a sentence: one means nothing on the
+ * page said what the total was, the other means something did and the arithmetic
+ * disagrees with it. Those are different situations calling for different things
+ * from the person reading — hunt for the figure, or adjudicate between two of
+ * them — so the difference now leads.
+ */
+function verdictLabel(verdict: TotalVerdict): {
+  heading: string;
+  text: string;
+  className: string;
+} {
   switch (verdict.kind) {
     case "corroborated":
       return {
-        text: `Checked — ${verdict.by}.`,
+        heading: "Total checked",
+        text: `${verdict.by}.`,
         className: "bg-slate-50 text-slate-600",
       };
     case "unverified":
       return {
         // Amber, and it is the only place in this project that uses a third
-        // colour. The whole design turns on three states being told apart at a
+        // colour. The whole design turns on these states being told apart at a
         // glance, and grey against grey is not telling them apart.
-        text: `Not checked — ${verdict.why}`,
+        heading: "Total not checked",
+        text: verdict.why,
         className: "bg-amber-50 text-amber-800",
       };
     case "contradicted":
-      return { text: verdict.problem, className: "bg-red-50 text-red-700" };
+      return {
+        heading: `Total read as ${verdict.read.toFixed(2)}, and that looks wrong`,
+        text: `${verdict.problem}. Nothing has been filled in — choose below, or type the right figure.`,
+        className: "bg-red-50 text-red-700",
+      };
     case "absent":
-      return { text: verdict.why, className: "bg-red-50 text-red-700" };
+      return {
+        heading: "No total found",
+        text: `${verdict.why} Read it off the photo and type it in.`,
+        className: "bg-red-50 text-red-700",
+      };
   }
 }
 
@@ -150,9 +175,10 @@ export function ReceiptReview({
         />
 
         <div className="space-y-4">
-          <p className={`rounded-lg px-4 py-3 text-sm ${label.className}`} data-verdict={verdict.kind}>
-            {label.text}
-          </p>
+          <div className={`rounded-lg px-4 py-3 text-sm ${label.className}`} data-verdict={verdict.kind}>
+            <p className="font-medium">{label.heading}</p>
+            <p>{label.text}</p>
+          </div>
 
           {/*
             Both readings, as choices.
@@ -195,11 +221,24 @@ export function ReceiptReview({
             categories={categories}
           />
 
+          {/*
+            Said again beside the empty box, not only at the top.
+
+            An empty amount is the right answer to both "no number was found" and
+            "a number was found and disputed", and the reported problem was that
+            they looked identical from here. The banner above leads with which is
+            which; this repeats it where the eye actually is, which is the box
+            that needs filling.
+          */}
           {!amountUsable && (
             <p className="text-sm text-slate-500">
-              {suggestion.amount === null
-                ? "Fill in the total from the receipt to save it."
-                : "Enter an amount greater than zero."}
+              {verdict.kind === "contradicted"
+                ? `Left blank on purpose: ${verdict.read.toFixed(2)} was read and does not add up.`
+                : verdict.kind === "absent"
+                  ? "Left blank because no total was found on the receipt at all."
+                  : suggestion.amount === null
+                    ? "Fill in the total from the receipt to save it."
+                    : "Enter an amount greater than zero."}
             </p>
           )}
 

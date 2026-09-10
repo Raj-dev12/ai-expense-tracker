@@ -53,6 +53,8 @@ function progressLine(progress: ExtractProgress): string {
   const percent = progress.progress === null ? "" : ` ${Math.round(progress.progress * 100)}%`;
 
   switch (progress.phase) {
+    case "preparing":
+      return "Preparing the photo...";
     case "loading":
       return `Fetching the text reader${percent}. This happens once.`;
     case "reading":

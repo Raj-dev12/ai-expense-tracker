@@ -1,4 +1,5 @@
 import { ApiError, readReceipt } from "../api";
+import { prepareForOcr } from "./prepare";
 import {
   ReceiptError,
   type ExtractProgress,
@@ -117,16 +118,6 @@ function phaseFor(status: string): ExtractProgress["phase"] {
   return "loading";
 }
 
-/** The image's own pixel dimensions, which is what the word boxes are measured in. */
-function measure(url: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => reject(new ReceiptError("unsupported-type", "That image could not be opened."));
-    image.src = url;
-  });
-}
-
 export class TesseractReceiptExtractor implements ReceiptExtractor {
   async extract(
     image: File,
@@ -141,11 +132,15 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
       throw new ReceiptError("too-large", "That image is too large. Try a smaller photo.");
     }
 
-    const imageUrl = URL.createObjectURL(image);
+    onProgress?.({ phase: "preparing", progress: null });
+
+    // Orientation applied, scaled down, greyscaled and contrast-stretched. A raw
+    // phone photo is the hardest possible input and this is what turned "no text
+    // found" on a phone into a reading. See prepare.ts.
+    const prepared = await prepareForOcr(image);
+    const { canvas, width, height, url: imageUrl } = prepared;
 
     try {
-      const { width, height } = await measure(imageUrl);
-
       onProgress?.({ phase: "loading", progress: null });
 
       const { createWorker, OEM } = await ENGINE();
@@ -187,7 +182,11 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
         // `blocks` is what carries the geometry. Without it there is text and no
         // way to point at where on the photo it came from, which is most of the
         // reason this screen is worth having.
-        const { data } = await worker.recognize(image, {}, { text: true, blocks: true });
+        // The prepared canvas, not the original file. The word positions that
+        // come back are in *these* coordinates, which is why the confirm step
+        // shows this canvas too — anything else and the boxes would sit ninety
+        // degrees away from the text after an orientation fix.
+        const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
 
         const allLines = (data.blocks ?? []).flatMap((block) =>
           block.paragraphs.flatMap((paragraph) => paragraph.lines),

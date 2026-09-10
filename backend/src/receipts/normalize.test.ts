@@ -452,3 +452,42 @@ describe("receipts as OCR actually hands them over", () => {
     assert.equal(receipt.sources.merchant, "K-MARKET");
   });
 });
+
+describe("OCR debris around the shop name", () => {
+  /**
+   * The top of a receipt is the worst part of the page to read: a logo, a
+   * border, a torn edge, a barcode. None of it is text and OCR reports it as
+   * text anyway, which arrived as stray symbols wrapped around an otherwise
+   * correct name.
+   */
+  const noisy: Array<[string, string]> = [
+    ["*** K-MARKET ***", "K-MARKET"],
+    ["|| LIDL SUOMI ||", "LIDL SUOMI"],
+    ["~ PRISMA ~", "PRISMA"],
+    ["  .:K-MARKET RUOHOLAHTI:.  ", "K-MARKET RUOHOLAHTI"],
+    ["=== ALEPA ===", "ALEPA"],
+    ["_ S-MARKET _", "S-MARKET"],
+    ["»«PRISMA»«", "PRISMA"],
+  ];
+
+  for (const [written, expected] of noisy) {
+    it(`cleans ${JSON.stringify(written)}`, () => {
+      assert.equal(findMerchant([written, "Maito 1,29"]), expected);
+    });
+  }
+
+  it("keeps the marks that belong inside a name", () => {
+    // The important half. "K-MARKET" flattened to "KMARKET" would look correct
+    // and be wrong, which is worse than a stray character somebody can see and
+    // delete. So the ends are trimmed and the middle is left alone.
+    assert.equal(findMerchant(["K-MARKET", "Maito 1,29"]), "K-MARKET");
+    assert.equal(findMerchant(["#H&M#", "Paita 19,99"]), "H&M");
+    assert.equal(findMerchant(["-- Fafa's --", "Pita 9,90"]), "Fafa's");
+    assert.equal(findMerchant(["ST. LAURENT", "Takki 99,00"]), "ST. LAURENT");
+  });
+
+  it("gives up rather than returning punctuation", () => {
+    // A line that is nothing but border marks is not a name with noise on it.
+    assert.equal(findMerchant(["*****", "|||||", "Maito 1,29"]), null);
+  });
+});

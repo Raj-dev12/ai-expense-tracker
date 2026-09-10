@@ -694,6 +694,32 @@ nothing; both beat filling one in silently.
 The second row matters for a smaller reason: "we read a number" and "we checked a number" are
 different claims, and showing them identically states the first as though it were the second.
 
+### The photo is prepared before it is read
+
+There was none of this at first, and it showed: a receipt that read poorly on a desktop returned
+*no text at all* from the same receipt on a phone. A raw camera photo is the hardest possible
+input, and three things about it defeat OCR.
+
+**Orientation.** A phone does not rotate pixels when you turn it. It writes them in the sensor's
+orientation and adds a tag saying which way up they belong. Software is supposed to honour that
+tag and a canvas historically did not, so an image that is upright everywhere you look at it can
+reach the recogniser rotated a quarter turn — and text on its side reads as nothing.
+
+**Size.** A phone camera gives about four thousand pixels across. That is slow, it is a lot of
+memory on a phone, and past a point the extra pixels carry no extra letters. The long edge is
+scaled to two thousand, never up.
+
+**Contrast.** Thermal paper is grey on off-white under whatever light was there. The image is
+converted to grey and the range stretched so ink is properly black and paper properly white,
+ignoring the extreme two percent at each end so a glare spot cannot define "white" on its own.
+Deliberately not black-and-white: Tesseract does its own thresholding and does it better with
+grey than with something already thrown away.
+
+The prepared canvas is what gets recognised **and** what the confirm step shows you. The word
+positions come back in its coordinates, so showing anything else would let the boxes drift from
+the pixels under them — by ninety degrees, after an orientation fix. It also means a scan that
+went wrong shows you what the reader actually saw.
+
 ### Verifying, not approving
 
 Typing "24.50 at Lidl" means you already know what you meant. Photographing a receipt means you

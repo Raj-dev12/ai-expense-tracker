@@ -546,6 +546,34 @@ unreachable.
 - [ ] **Still unverified in a browser.** The same gap as before, and the reason this shipped
       broken. Needs a real phone
 
+## Reported from a phone, and fixed
+
+- [x] Asked directly and answered honestly: there was **no preprocessing at all**. The file went
+      straight into the recogniser. Never a decision — the shortest path that worked on the one
+      image it was tried on
+- [x] Orientation: a phone writes pixels in the sensor's orientation and tags which way up they
+      belong; a canvas need not honour the tag, so an upright-looking photo can reach the reader
+      rotated a quarter turn, and sideways text reads as nothing. `createImageBitmap` with
+      `imageOrientation: "from-image"` applies it
+- [x] Size: the long edge is scaled to 2000px, never up. A phone gives ~4000px, which is slow,
+      memory-hungry on a phone, and carries no extra letters
+- [x] Contrast: converted to grey and the range stretched, ignoring the extreme 2% at each end so
+      a glare spot cannot define white on its own. Deliberately not binarised — Tesseract does
+      that itself and does it better from grey
+- [x] The prepared canvas is what gets read *and* what the confirm step shows. The word boxes are
+      in its coordinates, so showing the original would let them drift by ninety degrees after an
+      orientation fix
+- [x] A blank total now says which kind of blank: "No total found" against "Total read as
+      2490.00, and that looks wrong". Repeated beside the box as well as in the banner, because
+      the box is where the eye is when it is empty
+- [x] Shop names have OCR debris trimmed off the ends — borders, logo fragments — while marks
+      inside a name are kept. "KMARKET" would look correct and be wrong; a stray character is
+      visible and takes one keystroke
+- [x] Verified: 307 backend tests, 337 render checks
+- [ ] **Still unverified in a browser**, including all of the above. The preprocessing is
+      browser-only code — canvas, `createImageBitmap`, EXIF — and none of it can run in the
+      check harness. Needs the phone again
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

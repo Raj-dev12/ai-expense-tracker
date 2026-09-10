@@ -339,6 +339,37 @@ export function findDate(lines: string[], today: string): { date: string; source
  * field they can see; being wrong about the total costs them a wrong expense, so
  * the effort belongs there.
  */
+/**
+ * Clean OCR debris off a shop's name.
+ *
+ * The top of a receipt is the worst part of the page to read: a logo, a border,
+ * a torn edge, a barcode. None of it is text, and OCR reports it as text anyway
+ * — the reported symptom was stray symbols wrapped around an otherwise correct
+ * name.
+ *
+ * Three passes, in order, and the order matters:
+ *
+ *   1. Drop anything that is not a letter, a digit, a space, or one of the few
+ *      marks that genuinely appear in shop names — the hyphen in "K-Market", the
+ *      ampersand in "H&M", the apostrophe in "Fafa's", the full stop in "St.".
+ *   2. Trim what is left of those marks off the ends. A hyphen belongs *inside*
+ *      K-Market; a hyphen leading the line is half a border.
+ *   3. Collapse the runs of spaces the first two passes leave behind.
+ *
+ * It deliberately does not strip marks from the middle. "K-MARKET" surviving
+ * intact matters more than the occasional stray character in the middle of a
+ * name, which is visible in the box and takes one keystroke to fix — whereas a
+ * name mangled into "KMARKET" looks correct and is not.
+ */
+function tidyName(raw: string): string {
+  return raw
+    .replace(/[^\p{L}\p{N}\s&'.-]/gu, " ")
+    .replace(/^[\s&'.-]+/u, "")
+    .replace(/[\s&'.-]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const NOT_A_MERCHANT = /\b(www|http|puh|tel|y-?tunnus|vat|alv|kuitti|receipt|kassa)\b/i;
 
 /**
@@ -365,12 +396,15 @@ export function findMerchant(lines: string[]): string | null {
     // joined result rather than to each line on its own.
     if (trimmed.replace(/[^\p{L}]/gu, "").length < 1) continue;
 
-    candidates.push(trimmed.replace(/\s+/g, " "));
+    const cleaned = tidyName(trimmed);
+    if (!cleaned) continue;
+
+    candidates.push(cleaned);
     if (candidates.join(" ").length >= 4) break;
   }
 
-  const name = candidates.join(" ").trim();
-  if (name.replace(/[^\p{L}]/gu, "").length < 2) return null;
+  const name = tidyName(candidates.join(" "));
+  if (!name || name.replace(/[^\p{L}]/gu, "").length < 2) return null;
   return name.slice(0, 120);
 }
 

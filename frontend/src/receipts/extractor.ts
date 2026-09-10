@@ -23,7 +23,7 @@ export type ExtractProgress = {
    * separately for that reason: "still loading" and "still reading" are
    * different kinds of patience.
    */
-  phase: "loading" | "reading" | "checking";
+  phase: "preparing" | "loading" | "reading" | "checking";
   /** 0 to 1 within the phase, or null when the step cannot report progress. */
   progress: number | null;
 };
