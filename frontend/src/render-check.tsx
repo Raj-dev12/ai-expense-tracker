@@ -37,6 +37,7 @@ import {
 import { endOfMonth, isInMonth, monthGrid, monthWindow, shiftMonth } from "./calendar";
 import { addDays } from "./periods";
 import { readCollapsed, type PanelId } from "./panels";
+import { ReceiptDebug } from "./components/ReceiptDebug";
 import { ReceiptReview } from "./components/ReceiptReview";
 import { ReceiptScanner } from "./components/ReceiptScanner";
 import type { ReceiptData, TotalVerdict } from "./api";
@@ -1814,3 +1815,70 @@ check("merchant: stray marks are cleaned off the name", normalizeSource.includes
 // But only off the ends. "K-MARKET" mangled into "KMARKET" would look correct
 // and be wrong, which is worse than a stray character somebody can see.
 check("merchant: marks inside a name are kept", normalizeSource.includes("does not strip marks from the middle"));
+
+// 34. What the reader saw, on screen.
+//
+// The question this answers decides which thing to fix: a receipt with no total
+// either never had one in the text, or had one that went unmatched. A photo
+// problem and a parser problem, indistinguishable without the text — and the
+// failure that most needed explaining happened on a phone, where there is no
+// console to open.
+const DIAGNOSTICS = {
+  preparedWidth: 1500,
+  preparedHeight: 2000,
+  sourceBytes: 3_145_728,
+  sourceType: "image/jpeg",
+  lineCount: 3,
+  wordCount: 9,
+  meanConfidence: 71,
+  lines: ["K-MARKET", "Maito 1,29", "T0TAI 1,29"],
+  imageUrl: "blob:prepared",
+};
+
+const withDebug = renderToStaticMarkup(<ReceiptDebug diagnostics={DIAGNOSTICS} />);
+check("debug: the raw text is shown verbatim", withDebug.includes("T0TAI 1,29"));
+check("debug: every line is there", withDebug.includes("K-MARKET") && withDebug.includes("Maito 1,29"));
+// The prepared size answers whether orientation and scaling did their job.
+check("debug: the prepared size is reported", withDebug.includes("1500") && withDebug.includes("2000"));
+check("debug: so is the confidence", withDebug.includes("71%"));
+check("debug: and the original file", withDebug.includes("3072 kB") && withDebug.includes("image/jpeg"));
+// A diagnostic, not part of the job.
+check("debug: it is folded away", withDebug.includes("<details") && withDebug.includes("<summary"));
+// The confirm step already shows the photo beside the fields; a second copy in
+// a fold would be noise.
+check("debug: the image is not repeated on a reading that worked", !withDebug.includes("blob:prepared"));
+
+// The case with no screen of its own: nothing was read at all. The image is the
+// single most useful thing here — sideways means orientation, smear means photo.
+const nothingRead = renderToStaticMarkup(
+  <ReceiptDebug
+    diagnostics={{ ...DIAGNOSTICS, lineCount: 0, wordCount: 0, meanConfidence: 0, lines: [] }}
+    showImage
+  />,
+);
+check("debug: a failure shows the prepared image", nothingRead.includes("blob:prepared"));
+check("debug: and says what to look for in it", nothingRead.includes("If this is sideways or unreadable"));
+check("debug: and says the picture is the problem, not the parsing", nothingRead.includes("this is the picture, not the parsing"));
+check("debug: with no text it does not pretend to have any", !nothingRead.includes("<pre"));
+
+// It reaches both screens: the failure, and a reading that worked.
+const scannerHasDebug = readFileSync(
+  new URL("./components/ReceiptScanner.tsx", import.meta.url),
+  "utf8",
+);
+const reviewHasDebug = readFileSync(
+  new URL("./components/ReceiptReview.tsx", import.meta.url),
+  "utf8",
+);
+check("debug: the failure screen shows it", scannerHasDebug.includes("<ReceiptDebug diagnostics={failed} showImage />"));
+check("debug: the confirm step shows it too", reviewHasDebug.includes("<ReceiptDebug diagnostics={diagnostics} />"));
+// A phone has no console, so the console is the second copy rather than the only one.
+const pipelineHasLog = readFileSync(new URL("./receipts/tesseract.ts", import.meta.url), "utf8");
+check("debug: it is logged as well, for a desktop", pipelineHasLog.includes("console.info"));
+// Matched on the call rather than on its argument: the newline inside
+// `join("\n")` has to survive being written into this file, and the first
+// attempt lost the escape and compared against a real line break.
+check("debug: the text is logged, not just the counts", pipelineHasLog.includes("console.info(lines"));
+// The prepared image outlives a failure, or the failure screen would show nothing.
+check("debug: a failure keeps its image alive", pipelineHasLog.includes("if (!caught.diagnostics) URL.revokeObjectURL"));
+check("debug: and the screen that shows it releases it", scannerHasDebug.includes("URL.revokeObjectURL(failed.imageUrl)"));

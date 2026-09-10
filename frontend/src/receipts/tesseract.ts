@@ -3,6 +3,7 @@ import { prepareForOcr } from "./prepare";
 import {
   ReceiptError,
   type ExtractProgress,
+  type ReceiptDiagnostics,
   type ReceiptExtractor,
   type ReceiptReading,
   type WordBox,
@@ -175,8 +176,29 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
         );
       }
 
-      let lines: string[];
-      let words: WordBox[];
+      let lines: string[] = [];
+      let words: WordBox[] = [];
+      let meanConfidence = 0;
+
+      /**
+       * What the reader saw, assembled whether or not it got anywhere.
+       *
+       * Built as a function so the failure paths below can call it with whatever
+       * had been filled in by the time they were reached — a phone that read
+       * nothing still has an image size and a word count of zero to report, and
+       * those two numbers are most of the diagnosis.
+       */
+      const diagnose = (): ReceiptDiagnostics => ({
+        preparedWidth: width,
+        preparedHeight: height,
+        sourceBytes: image.size,
+        sourceType: image.type || "unknown",
+        lineCount: lines.length,
+        wordCount: words.length,
+        meanConfidence: Math.round(meanConfidence),
+        lines,
+        imageUrl,
+      });
 
       try {
         // `blocks` is what carries the geometry. Without it there is text and no
@@ -202,6 +224,16 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
             height: word.bbox.y1 - word.bbox.y0,
           })),
         );
+        meanConfidence = data.confidence ?? 0;
+
+        // Always, not only on failure. A desktop console is the quickest way to
+        // read forty lines, and this is the text the parser was given — so
+        // "the total was not in the text" and "it was there and not matched"
+        // stop being the same observation.
+        console.info(
+          `receipt: ${lines.length} lines, ${words.length} words, confidence ${Math.round(meanConfidence)}%, prepared ${width}x${height}`,
+        );
+        console.info(lines.join("\n"));
       } catch (caught) {
         // A core file that would not fetch throws here rather than above,
         // because the worker loads it lazily on the first recognition. Before
@@ -211,16 +243,22 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
           ? new ReceiptError(
               "engine-failed",
               "The text reader could not be loaded. Reload the page, or type the expense instead.",
+              diagnose(),
             )
-          : new ReceiptError("failed", "That photo could not be read.");
+          : new ReceiptError("failed", "That photo could not be read.", diagnose());
       } finally {
         await worker.terminate();
       }
 
       if (lines.length === 0) {
+        // The case that most needs explaining, and the one with no screen of its
+        // own to explain it on. The diagnostics carry the prepared image and its
+        // size, which between them answer the two likeliest questions: did the
+        // orientation fix work, and was it scaled to something sane.
         throw new ReceiptError(
           "no-text",
-          "No text could be found on that image. Try a straighter, brighter photo.",
+          "The text reader ran, but found no text on that photo.",
+          diagnose(),
         );
       }
 
@@ -235,13 +273,18 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
         imageUrl,
         imageWidth: width,
         imageHeight: height,
+        diagnostics: diagnose(),
       };
     } catch (caught) {
-      // The photo is the only thing holding memory here, and nothing downstream
-      // will get the chance to release it if this throws.
-      URL.revokeObjectURL(imageUrl);
+      // A ReceiptError carrying diagnostics owns the image now — the failure
+      // screen displays it, so revoking here would blank the one picture that
+      // explains what went wrong. Whoever shows it releases it.
+      if (caught instanceof ReceiptError) {
+        if (!caught.diagnostics) URL.revokeObjectURL(imageUrl);
+        throw caught;
+      }
 
-      if (caught instanceof ReceiptError) throw caught;
+      URL.revokeObjectURL(imageUrl);
       // The endpoint answered with something. That is a different failure from
       // the reading, and saying so stops it being reported as a bad photo.
       if (caught instanceof ApiError) throw new ReceiptError("check-failed", caught.message);

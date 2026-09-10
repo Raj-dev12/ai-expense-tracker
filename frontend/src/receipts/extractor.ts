@@ -49,10 +49,19 @@ export type ReceiptReading = {
   /** The same shape a parsed sentence produces, ready for the ordinary fields. */
   suggestion: Suggestion;
   words: WordBox[];
-  /** An object URL for the photo. The caller revokes it when finished. */
+  /** An object URL for the prepared photo. The caller revokes it when finished. */
   imageUrl: string;
   imageWidth: number;
   imageHeight: number;
+  /**
+   * What the reader saw, carried through even on success.
+   *
+   * A receipt that read *well enough* to reach the confirm step and still lost
+   * its total is the case this answers: the text is right there to look at, so
+   * "the total was never in the text" and "it was there and not matched" stop
+   * being indistinguishable.
+   */
+  diagnostics: ReceiptDiagnostics;
 };
 
 /**
@@ -74,10 +83,42 @@ export type ReceiptFailure =
   | "check-failed"
   | "failed";
 
+/**
+ * What the reader actually saw, whether or not it got anywhere.
+ *
+ * This exists because of a question nobody could answer: when a receipt comes
+ * back with no total, is the total missing from the text, or present in it and
+ * unmatched? Those need opposite fixes — a better photo against a better parser
+ * — and without the text in front of you it is a coin toss.
+ *
+ * It is attached to failures as well as to successes, and that is the point. The
+ * case that most needs explaining is the one that produces no screen at all: a
+ * phone that read nothing. A console would do on a desktop; on a phone there is
+ * no console to open, so the diagnosis has to be somewhere a thumb can reach it.
+ */
+export type ReceiptDiagnostics = {
+  /** The size handed to the recogniser, after orientation and scaling. */
+  preparedWidth: number;
+  preparedHeight: number;
+  /** The original, so a scaling problem is visible as a pair of numbers. */
+  sourceBytes: number;
+  sourceType: string;
+  lineCount: number;
+  wordCount: number;
+  /** Tesseract's own score for the page, 0 to 100. Low means illegible. */
+  meanConfidence: number;
+  /** Exactly what came back, line by line. */
+  lines: string[];
+  /** The prepared image, so what the reader saw can be looked at. */
+  imageUrl: string | null;
+};
+
 export class ReceiptError extends Error {
   constructor(
     public readonly kind: ReceiptFailure,
     message: string,
+    /** Present whenever the reader got far enough to have something to report. */
+    public readonly diagnostics?: ReceiptDiagnostics,
   ) {
     super(message);
     this.name = "ReceiptError";

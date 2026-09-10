@@ -574,6 +574,24 @@ unreachable.
       browser-only code — canvas, `createImageBitmap`, EXIF — and none of it can run in the
       check harness. Needs the phone again
 
+## Seeing what the reader saw
+
+- [x] Asked for before changing the parser, and right to ask: nobody could tell whether a
+      missing total was absent from the OCR text or present in it and unmatched. A photo problem
+      and a parser problem, indistinguishable, getting opposite fixes
+- [x] The raw text is now on screen, folded away, on both the confirm step and the failure
+      screen — with the prepared size, the word count and Tesseract confidence above it
+- [x] On screen rather than only in a console, because the failure that needed explaining was on
+      a phone and a phone has no console to open. It logs as well, for a desktop
+- [x] The failure screen shows the **prepared image**, which is the single most useful thing
+      there: sideways means orientation is the bug, a grey smear means the photo is
+- [x] A failure now keeps its object URL alive so that image can be shown, and the screen showing
+      it releases it
+- [x] Found while writing the checks: a heredoc ate the escape in one of them, so it compared
+      against a real line break instead of the two characters in the source. Matched on the call
+      rather than its argument
+- [x] Verified: 307 backend tests, 354 render checks
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

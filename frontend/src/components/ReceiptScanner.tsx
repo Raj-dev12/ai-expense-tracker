@@ -1,7 +1,13 @@
 import { useRef, useState } from "react";
-import type { ExtractProgress, ReceiptFailure, ReceiptReading } from "../receipts/extractor";
+import type {
+  ExtractProgress,
+  ReceiptDiagnostics,
+  ReceiptFailure,
+  ReceiptReading,
+} from "../receipts/extractor";
 import { ReceiptError } from "../receipts/extractor";
 import { TesseractReceiptExtractor } from "../receipts/tesseract";
+import { ReceiptDebug } from "./ReceiptDebug";
 
 /**
  * Choosing a photo, and waiting while it is read.
@@ -75,14 +81,28 @@ export function ReceiptScanner({
   const input = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ExtractProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * What the reader saw when it failed, kept so it can be shown.
+   *
+   * A failure carries the prepared image with it, which means this component
+   * owns an object URL and has to release it — on the next attempt, and when the
+   * failure is replaced by a success.
+   */
+  const [failed, setFailed] = useState<ReceiptDiagnostics | null>(null);
 
   const scanning = progress !== null;
+
+  function forget() {
+    if (failed?.imageUrl) URL.revokeObjectURL(failed.imageUrl);
+    setFailed(null);
+  }
 
   async function handleFile(file: File | undefined) {
     if (!file || scanning) return;
 
     setError(null);
-    setProgress({ phase: "loading", progress: null });
+    forget();
+    setProgress({ phase: "preparing", progress: null });
 
     try {
       onRead(await extractor.extract(file, setProgress));
@@ -90,6 +110,9 @@ export function ReceiptScanner({
       setError(
         caught instanceof ReceiptError ? FAILURES[caught.kind] : FAILURES.failed,
       );
+      // The diagnosis, on screen rather than in a console, because the failure
+      // worth diagnosing happened on a phone where there is no console to open.
+      if (caught instanceof ReceiptError && caught.diagnostics) setFailed(caught.diagnostics);
     } finally {
       setProgress(null);
       // Cleared so that choosing the same file twice fires a change event. Left
@@ -139,6 +162,8 @@ export function ReceiptScanner({
       )}
 
       {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+
+      {failed && <ReceiptDebug diagnostics={failed} showImage />}
     </div>
   );
 }

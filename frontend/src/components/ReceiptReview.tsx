@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { NewExpense, ReceiptData, TotalVerdict, Suggestion } from "../api";
-import type { WordBox } from "../receipts/extractor";
+import type { ReceiptDiagnostics, WordBox } from "../receipts/extractor";
 import {
   ExpenseFields,
   amountIsUsable,
   parseAmount,
   type ExpenseFieldValues,
 } from "./ExpenseFields";
+import { ReceiptDebug } from "./ReceiptDebug";
 import { ReceiptImage } from "./ReceiptImage";
 
 /**
@@ -93,6 +94,7 @@ export function ReceiptReview({
   imageUrl,
   imageWidth,
   imageHeight,
+  diagnostics,
   saving,
   showCurrency,
   categories,
@@ -105,6 +107,11 @@ export function ReceiptReview({
   imageUrl: string;
   imageWidth: number;
   imageHeight: number;
+  /**
+   * Optional, so the render checks can mount this without inventing one.
+   * Present in the app always.
+   */
+  diagnostics?: ReceiptDiagnostics;
   saving: boolean;
   showCurrency: boolean;
   categories: string[];
@@ -266,6 +273,17 @@ export function ReceiptReview({
           )}
         </div>
       </div>
+
+      {/*
+        The text the parser was given.
+
+        Here even on a reading that worked, because the case it answers is a
+        receipt that read well enough to reach this screen and still lost its
+        total: the text is right there, so "it was never in the text" and "it was
+        there and not matched" stop being the same observation. One is a photo
+        problem, the other is a parser problem, and they get opposite fixes.
+      */}
+      {diagnostics && <ReceiptDebug diagnostics={diagnostics} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <button

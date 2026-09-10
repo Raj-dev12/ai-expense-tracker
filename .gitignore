@@ -22,6 +22,7 @@ postgres-data/
 
 # Scratch file used to hand over instructions. Kept on disk, never committed.
 do this.txt
+do this
 
 # Vercel CLI scratch, if it is ever used locally.
 .vercel/

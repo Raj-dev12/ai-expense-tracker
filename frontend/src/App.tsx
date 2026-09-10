@@ -805,6 +805,7 @@ export default function App() {
               imageUrl={scan.imageUrl}
               imageWidth={scan.imageWidth}
               imageHeight={scan.imageHeight}
+              diagnostics={scan.diagnostics}
               saving={saving}
               showCurrency={conversionEnabled}
               categories={categoryList.map((category) => category.name)}
