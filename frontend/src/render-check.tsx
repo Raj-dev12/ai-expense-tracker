@@ -18,7 +18,7 @@
  * they cannot see the layout either, but they assert the two specific decisions
  * that caused that bug. Treat them as a tripwire, not as proof.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createCategory, deleteCategory, deleteExpense, listExpenses } from "./api";
 import type { CategoryName, CategorySlice, Expense, Summary } from "./api";
@@ -1603,3 +1603,155 @@ check("receipt: it takes a photo directly on a phone", scanner.includes('capture
 check("receipt: it accepts images only", scanner.includes('accept="image/*"'));
 const busyScanner = renderToStaticMarkup(<ReceiptScanner busy={true} onRead={() => {}} />);
 check("receipt: it stands down while something else is mid-flight", busyScanner.includes("disabled"));
+
+// 29. Every asset Tesseract can ask for is actually vendored.
+//
+// THIS CHECK EXISTS BECAUSE THE LAST ONE WAS CIRCULAR
+// ---------------------------------------------------
+// The first version of this verification started a dev server and requested the
+// five files that had been copied into `public/tesseract`. All five answered
+// 200, which proved only that the files copied were the files copied. The
+// browser then asked for a sixth — `tesseract-core-relaxedsimd-lstm.wasm.js`,
+// chosen because the browser supports relaxed SIMD and the Node run did not —
+// and OCR failed to start at all.
+//
+// So the list is not written here. It is read out of tesseract.js's own worker
+// source, which is the thing that decides which file to fetch at runtime. A
+// version bump that adds a seventh variant fails this check rather than
+// discovering it in somebody's browser.
+const workerSource = readFileSync(
+  new URL("../node_modules/tesseract.js/dist/worker.min.js", import.meta.url),
+  "utf8",
+);
+
+const coresTesseractCanAskFor = [
+  ...new Set(workerSource.match(/tesseract-core[a-z-]*\.wasm\.js/g) ?? []),
+].sort();
+
+check(
+  "assets: the core variants are read from tesseract's own source",
+  coresTesseractCanAskFor.length >= 6,
+  `${coresTesseractCanAskFor.length} named in worker.min.js`,
+);
+
+for (const core of coresTesseractCanAskFor) {
+  check(
+    `assets: ${core} is vendored`,
+    existsSync(new URL(`../public/tesseract/${core}`, import.meta.url)),
+  );
+}
+
+// The worker itself and the language data, which are named by this app rather
+// than by tesseract, so they are listed — but the paths come from the extractor's
+// own source rather than from this file, for the same reason as above.
+const extractorSource = readFileSync(
+  new URL("./receipts/tesseract.ts", import.meta.url),
+  "utf8",
+);
+const languages = [...(extractorSource.match(/"(eng|fin|[a-z]{3})"/g) ?? [])]
+  .map((quoted) => quoted.slice(1, -1))
+  .filter((code) => /^[a-z]{3}$/.test(code));
+
+check("assets: the worker script is vendored", existsSync(new URL("../public/tesseract/worker.min.js", import.meta.url)));
+for (const language of new Set(languages)) {
+  check(
+    `assets: ${language}.traineddata.gz is vendored`,
+    existsSync(new URL(`../public/tesseract/${language}.traineddata.gz`, import.meta.url)),
+  );
+}
+
+// The engine is fetched from this app rather than from a CDN, which is the whole
+// reason the files above have to be present.
+check("assets: the engine is served from this app, not a CDN", extractorSource.includes('const ASSETS = "/tesseract"'));
+check("assets: and is loaded on demand", extractorSource.includes('import("tesseract.js")'));
+
+// 30. The three failures that were indistinguishable, and now are not.
+//
+// A missing engine file reported "That receipt could not be read. Try another
+// photo", which sent somebody to inspect a photo that was fine. Three outcomes
+// have to be told apart from each other, and from the fourth case that is not a
+// failure at all:
+//
+//   the reader would not load     — the photo is irrelevant
+//   the reader found no text      — the photo is the problem
+//   the server could not be asked — neither is the photo's fault
+//   text read, but no total       — not an error; goes to the confirm step
+const scannerSource = readFileSync(
+  new URL("./components/ReceiptScanner.tsx", import.meta.url),
+  "utf8",
+);
+const extractorTypes = readFileSync(
+  new URL("./receipts/extractor.ts", import.meta.url),
+  "utf8",
+);
+
+// Every failure the extractor can raise has a message of its own. Derived from
+// the union rather than from a list written here, so a new kind cannot be added
+// without one.
+//
+// Scoped to the ReceiptFailure declaration specifically. The first version read
+// every quoted union member in the file and picked up "reading" and "checking"
+// from the progress phases — then reported they had messages, because
+// `progressLine` contains `case "reading":`. A check that finds what it is
+// looking for in the wrong place is not a check.
+// Comments come out first. A semicolon inside one of the doc comments ended
+// the slice early and lost two of the six kinds, which the check then reported
+// as the type having four — right about what it read, wrong about the type.
+const withoutComments = extractorTypes.replace(/\/\*\*[\s\S]*?\*\//g, "");
+const unionStart = withoutComments.indexOf("export type ReceiptFailure");
+const failureUnion = withoutComments.slice(
+  unionStart,
+  withoutComments.indexOf(";", unionStart),
+);
+const failureKinds = [
+  ...new Set((failureUnion.match(/"[a-z-]+"/g) ?? []).map((quoted) => quoted.slice(1, -1))),
+];
+check(
+  "scanner: the failure kinds are read from the type",
+  failureKinds.length === 6 && !failureKinds.includes("reading"),
+  failureKinds.join(", "),
+);
+for (const kind of failureKinds) {
+  // Matched inside the message table, not anywhere in the file — the same
+  // mistake in a smaller place.
+  const table = scannerSource.slice(
+    scannerSource.indexOf("const FAILURES"),
+    scannerSource.indexOf("};", scannerSource.indexOf("const FAILURES")),
+  );
+  check(`scanner: "${kind}" has a message of its own`, new RegExp(`"?${kind}"?:`).test(table));
+}
+
+// The messages must not merely exist — they must differ. Two failures sharing a
+// sentence is the bug that was reported.
+const messages = [...(scannerSource.match(/^\s*"?[a-z-]+"?:\s*\n?\s*"[^"]{20,}"/gm) ?? [])].map(
+  (entry) => entry.slice(entry.indexOf('"', entry.indexOf(":")) + 1, -1),
+);
+check("scanner: every failure message is different", new Set(messages).size === messages.length, `${messages.length} messages`);
+
+// The specific confusion that was reported: an engine failure must not blame the
+// photo, and a photo failure must not blame the engine.
+const engineMessage = messages.find((message) => message.includes("text reader could not be loaded")) ?? "";
+const noTextMessage = messages.find((message) => message.includes("found no text")) ?? "";
+check("scanner: an engine failure says the photo is not the problem", engineMessage.includes("not a problem with the image"));
+check("scanner: and does not suggest another photo", !/another photo|Try another/.test(engineMessage));
+check("scanner: a no-text failure does blame the photo", noTextMessage.includes("photo"));
+check("scanner: and the two are not the same sentence", engineMessage !== "" && engineMessage !== noTextMessage);
+
+// The classifier is what routes a worker error to the right message. It has to
+// recognise the browser's own wording for a script a worker could not load.
+const extractorSourceForChecks = readFileSync(
+  new URL("./receipts/tesseract.ts", import.meta.url),
+  "utf8",
+);
+check("scanner: importScripts failures are classified as an engine failure", extractorSourceForChecks.includes("importScripts"));
+check("scanner: so are failed wasm fetches", /NetworkError|WebAssembly/.test(extractorSourceForChecks));
+// A hang is worse than a failure: there is nothing to report and nothing to do.
+check("scanner: a stalled engine load times out rather than waiting for ever", extractorSourceForChecks.includes("ENGINE_TIMEOUT_MS"));
+
+// And the fourth case is still not a failure. Text with no total reaches the
+// confirm step, where the photo and everything else read off it are worth
+// keeping.
+check(
+  "scanner: no total found is not treated as a failure",
+  !scannerSource.includes("no-total") && absent.includes("No line on this receipt"),
+);

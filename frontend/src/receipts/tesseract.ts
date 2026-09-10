@@ -64,6 +64,48 @@ const ACCEPTED_TYPES = [
 const MAX_BYTES = 12 * 1024 * 1024;
 
 /**
+ * How long the engine gets to load before it is called a failure.
+ *
+ * Generous, because the first load is around thirty megabytes on a cold cache.
+ * It exists because of how this failed in practice: a missing core variant threw
+ * inside the worker as an *uncaught* error, so the promise never settled at all
+ * and the screen sat on "Fetching the text reader" indefinitely. A wait with no
+ * end is worse than a failure, because there is nothing to report and nothing to
+ * do. This turns one into the other.
+ */
+const ENGINE_TIMEOUT_MS = 120_000;
+
+/**
+ * Whether a thrown thing is the engine failing to load rather than the receipt
+ * failing to read.
+ *
+ * The distinction was missing, and it is exactly the one that mattered when this
+ * broke: a core file that would not fetch produced "That receipt could not be
+ * read. Try another photo", which sent somebody looking at their photo when the
+ * problem was a missing asset on the server.
+ *
+ * Matched on the message because that is all a worker gives back. `importScripts`
+ * is the browser's own wording when a worker cannot load a script; the rest are
+ * the shapes a failed WebAssembly fetch takes.
+ */
+function looksLikeAnEngineFailure(caught: unknown): boolean {
+  const message = caught instanceof Error ? `${caught.name} ${caught.message}` : String(caught);
+  return /importScripts|NetworkError|WebAssembly|\.wasm|Failed to fetch|traineddata|SetImageFile|Load failed/i.test(
+    message,
+  );
+}
+
+/** Reject rather than hang, so a stall becomes something the screen can say. */
+function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new ReceiptError("engine-failed", message)), ms),
+    ),
+  ]);
+}
+
+/**
  * Turn the engine's running commentary into something worth showing.
  *
  * Tesseract reports a dozen internal statuses. They collapse to two questions a
@@ -110,20 +152,31 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
 
       let worker;
       try {
-        worker = await createWorker(LANGUAGES, OEM.LSTM_ONLY, {
-          workerPath: `${ASSETS}/worker.min.js`,
-          corePath: ASSETS,
-          langPath: ASSETS,
-          // The language files are the gzipped ones, which is what the sizes in
-          // `public/tesseract` are.
-          gzip: true,
-          logger: (message) =>
-            onProgress?.({ phase: phaseFor(message.status), progress: message.progress ?? null }),
-        });
-      } catch {
+        worker = await withTimeout(
+          createWorker(LANGUAGES, OEM.LSTM_ONLY, {
+            workerPath: `${ASSETS}/worker.min.js`,
+            corePath: ASSETS,
+            langPath: ASSETS,
+            // The language files are the gzipped ones, which is what the sizes in
+            // `public/tesseract` are.
+            gzip: true,
+            logger: (message) =>
+              onProgress?.({ phase: phaseFor(message.status), progress: message.progress ?? null }),
+            // Without this a failure inside the worker is an uncaught error that
+            // never reaches the promise, which is how a missing core file turned
+            // into a screen that waited for ever instead of saying anything.
+            errorHandler: (error: unknown) => {
+              console.error("receipt reader:", error);
+            },
+          }),
+          ENGINE_TIMEOUT_MS,
+          "The text reader did not finish loading. Check your connection and reload the page.",
+        );
+      } catch (caught) {
+        if (caught instanceof ReceiptError) throw caught;
         throw new ReceiptError(
           "engine-failed",
-          "The text reader could not start. Reload the page and try again.",
+          "The text reader could not be loaded. Reload the page, or type the expense instead.",
         );
       }
 
@@ -150,6 +203,17 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
             height: word.bbox.y1 - word.bbox.y0,
           })),
         );
+      } catch (caught) {
+        // A core file that would not fetch throws here rather than above,
+        // because the worker loads it lazily on the first recognition. Before
+        // this branch existed it landed in the generic bucket and blamed the
+        // photo.
+        throw looksLikeAnEngineFailure(caught)
+          ? new ReceiptError(
+              "engine-failed",
+              "The text reader could not be loaded. Reload the page, or type the expense instead.",
+            )
+          : new ReceiptError("failed", "That photo could not be read.");
       } finally {
         await worker.terminate();
       }
@@ -179,7 +243,15 @@ export class TesseractReceiptExtractor implements ReceiptExtractor {
       URL.revokeObjectURL(imageUrl);
 
       if (caught instanceof ReceiptError) throw caught;
-      if (caught instanceof ApiError) throw new ReceiptError("failed", caught.message);
+      // The endpoint answered with something. That is a different failure from
+      // the reading, and saying so stops it being reported as a bad photo.
+      if (caught instanceof ApiError) throw new ReceiptError("check-failed", caught.message);
+      if (looksLikeAnEngineFailure(caught)) {
+        throw new ReceiptError(
+          "engine-failed",
+          "The text reader could not be loaded. Reload the page, or type the expense instead.",
+        );
+      }
       throw new ReceiptError("failed", "That receipt could not be read.");
     }
   }

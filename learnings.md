@@ -1287,7 +1287,8 @@ want when someone asks you about the project in six months.
 | An item's amount must have cents | "5" on a line with words is not a price | Found by an address: "Itämerenkatu 21, Helsinki" was read as a twenty-one euro purchase, which then contradicted a total that was perfectly correct. A receipt prints "5,00", never "5". A genuine whole-euro item is missed, and that is the safe direction — the sum then disagrees and a person is asked, rather than a wrong sum quietly confirming a wrong total. |
 | A discount makes a mismatch inconclusive, not wrong | Lines summing to *more* than the total is what a discount looks like | OCR rarely preserves a minus sign well enough to add discounts in with a negative value, so they are excluded and merely noticed. Lines summing to *less* than the total is money nothing accounts for and stays a disagreement either way. |
 | The boxes on the photo are elements, not a canvas | Positioned as a percentage of the image | A canvas needs the displayed size, so it needs redrawing on every resize and zoom, and produces nothing a check outside a browser can see. Percentage-positioned elements scale themselves and are ordinary markup, so the checks can assert the total really was marked without a browser being involved. |
-| Tesseract assets are self-hosted | ~14 MB in `frontend/public/tesseract/` | A CDN would keep the repository small and make scanning quietly dependent on a third party being reachable — offline or behind a restrictive network it would stop working with no way to tell why from inside the app. Both language files are shipped because the Finnish ones earn their size on YHTEENSÄ, ALV and the ä in a shop's name. |
+| Every core variant is vendored, not the one that was observed | All six, ~31 MB | Tesseract chooses at runtime between relaxed SIMD, SIMD and plain builds on what the browser supports, so the file it asks for is not knowable from one machine. Five were shipped, the browser asked for the sixth, and OCR never started. The required list is now read out of tesseract.js's own source by a check, so it cannot drift from what the library actually requests. |
+| Tesseract assets are self-hosted | ~31 MB in `frontend/public/tesseract/` | A CDN would keep the repository small and make scanning quietly dependent on a third party being reachable — offline or behind a restrictive network it would stop working with no way to tell why from inside the app. Both language files are shipped because the Finnish ones earn their size on YHTEENSÄ, ALV and the ä in a shop's name. |
 | tesseract.js, loaded on demand | The dependency, and why | It is the only WebAssembly OCR engine that runs in a browser with no service behind it, which the no-API-key rule requires. The alternative considered was a vision model, which would have been more accurate and needed a key and a paid service — it stays available as a second `ReceiptExtractor`, behind the same interface. Imported with a dynamic `import()` so several megabytes stay out of the first paint. |
 | The merchant is what survives, not what matches | No preposition required; the leftover after the amount, currency and date is the name | "32 euro netflix sept 5" has a shop name sitting between the amount and the date with nothing marking it. Requiring "at", "from", "in" or "on" was a whitelist of the ways a name can appear in a sentence, and there is always another way — the same shape as the query box only answering questions whose wording it had anticipated. Inverting it removes the list rather than lengthening it. |
 | A preposition splits, it no longer gates | Before it is what was bought, after it is where | It is genuinely the best evidence a sentence offers about the boundary, so it is still used first — "coffee and tea at k market" needs no guessing at all. What changed is that its absence is no longer fatal. |
@@ -3363,6 +3364,52 @@ It misses a genuine whole-euro item, and that is the safe direction: the sum the
 the total and a person is asked, rather than a wrong sum quietly confirming a wrong total. Worth
 noticing that the failure was in the direction the design wants — a false alarm, not a silent
 acceptance.
+
+**A verification that tested my own list instead of the requirement**
+
+The receipt feature shipped broken. The browser console said:
+
+> Failed to execute 'importScripts': The script at
+> '/tesseract/tesseract-core-relaxedsimd-lstm.wasm.js' failed to load.
+
+Five WebAssembly core variants had been vendored. Tesseract asked for a sixth. It picks at
+runtime between relaxed SIMD, plain SIMD and neither, on what the browser supports — and the
+Node run used to verify this supported something different from the browser, so it fetched a
+different file.
+
+**The verification said "all five assets serve at the exact paths the extractor requests".** That
+sentence was false in a way worth dwelling on. It started a server, requested the five files that
+had been copied in, got five 200s, and reported success. It tested that the files copied were the
+files copied. The set under test came from the same place as the answer, so it could not fail.
+
+This is the fourth check in this project to pass for the wrong reason, and the first to do it
+about something that then shipped. The others were caught by rereading. The pattern behind all of
+them is one thing:
+
+> **A check whose expected values come from the same source as the thing being checked cannot
+> fail.** It is a tautology wearing a test's clothes.
+
+The fix is not more assertions. It is taking the expected values from somewhere independent —
+here, reading the variant filenames out of tesseract.js's own worker source, which is the code
+that actually decides what to fetch. That check was then confirmed to fail by deleting the file
+the browser had asked for, which is the step the original verification never had.
+
+**Two failures that read as one**
+
+The same report noted that an engine that would not load, a photo with no text on it, and a
+receipt with no total all told you the same thing. The first was landing in the generic bucket
+and saying "That receipt could not be read. Try another photo" — sending somebody to inspect a
+photo that was fine.
+
+Worse, the error arrived *uncaught*: it was thrown inside the worker, so the promise never
+settled and the screen sat on "Fetching the text reader" with no end. A wait with no end is worse
+than a failure, because there is nothing to report and nothing to do about it.
+
+Three changes. Errors that mention `importScripts`, a failed wasm fetch or a missing traineddata
+are classified as the engine rather than the image, wherever they are thrown. The engine load has
+a timeout, so a hang becomes a sentence. And the messages now say which of the three happened,
+with the engine one stating outright that the photo is not the problem — because the useful part
+of an error message is what it tells you to stop doing.
 
 **The same whitelist mistake, in a second place**
 

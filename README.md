@@ -729,9 +729,17 @@ a person presses save. Nothing is ever added silently. The list shows it as `add
 ### Running it
 
 The engine and the English and Finnish language data are served from this repository — about
-14 MB under `frontend/public/tesseract/` — rather than fetched from a CDN, so scanning works
+31 MB under `frontend/public/tesseract/` — rather than fetched from a CDN, so scanning works
 offline and does not depend on a third party staying reachable. The first scan in a browser
-downloads them once and says so while it does.
+downloads only the parts it needs, once, and says so while it does.
+
+All six WebAssembly core variants are vendored, not just the one this machine happened to use.
+Tesseract picks between them at runtime on what the browser supports — relaxed SIMD, plain SIMD,
+or neither — so which file gets requested is not knowable in advance. Shipping five of the six is
+how the first version broke: the browser asked for the relaxed-SIMD build, got a 404, and OCR
+never started. A check now reads the list of variants out of tesseract.js's own worker source and
+fails if any is missing, so a version bump that adds a seventh is caught here rather than in
+somebody's browser.
 
 ## The currency is the first question
 

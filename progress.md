@@ -517,6 +517,35 @@ unreachable.
       the check harness rewrites every URL to the backend, so the engine load, the camera capture
       and the overlay are eye-only. Needs a real phone and a real receipt
 
+## Reported from a real browser, and fixed
+
+- [x] OCR never started. Tesseract asked for `tesseract-core-relaxedsimd-lstm.wasm.js`, which was
+      not among the five core variants vendored — it picks between relaxed SIMD, SIMD and plain at
+      runtime on what the browser supports, and the Node run used to "verify" this supported
+      something different
+- [x] The verification was circular and said so confidently. It requested the five files that had
+      been copied in and got five 200s, which tested that the files copied were the files copied.
+      The set under test came from the same place as the answer
+- [x] All six variants now vendored, ~31 MB. The required list is read out of tesseract.js's own
+      worker source by a check, so it cannot drift from what the library actually asks for
+- [x] That check was confirmed to fail by deleting the file the browser had wanted — the step the
+      original verification never had
+- [x] Errors mentioning `importScripts`, a failed wasm fetch or missing traineddata are now
+      classified as the engine failing rather than the photo, wherever they are thrown
+- [x] The engine load has a timeout. The failure arrived uncaught inside the worker, so the
+      promise never settled and the screen waited for ever — worse than a failure, because there
+      is nothing to report
+- [x] The three outcomes now say different things: the reader would not load (the photo is
+      irrelevant), the reader found no text (the photo is the problem), the server could not be
+      asked (neither is). A fourth — text read but no total — is still not an error and goes to
+      the confirm step
+- [x] Checks derive the failure kinds from the type and assert every message differs. Confirmed
+      to fail by making two of them share a sentence
+- [x] Verified: 298 backend tests, 318 render checks, and all nine assets served over HTTP at
+      paths listed by tesseract.js rather than by me
+- [ ] **Still unverified in a browser.** The same gap as before, and the reason this shipped
+      broken. Needs a real phone
+
 ## Finishing
 
 - [x] Extra feature: `POST /api/ai/monthly-summary` and a button on the dashboard.

@@ -66,8 +66,12 @@ export type ReceiptReading = {
 export type ReceiptFailure =
   | "unsupported-type"
   | "too-large"
+  /** The reader itself would not load. Nothing to do with the photo. */
   | "engine-failed"
+  /** The reader ran and found nothing on the image. */
   | "no-text"
+  /** The reader worked; asking the server what the text meant did not. */
+  | "check-failed"
   | "failed";
 
 export class ReceiptError extends Error {

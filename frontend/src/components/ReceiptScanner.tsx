@@ -20,15 +20,32 @@ const extractor = new TesseractReceiptExtractor();
  * What to say when it does not work, and what to offer next.
  *
  * Each failure gets its own sentence rather than one apology for all of them,
- * because the way forward differs: a wrong file wants a different file, an
- * unreadable photo wants a better photo, and an engine that would not start
- * wants a reload or the typing box instead.
+ * because the way forward differs entirely — and the first time this broke in a
+ * real browser, it did not. A missing engine file reported "That receipt could
+ * not be read. Try another photo", which sent somebody to inspect a photo that
+ * was fine while the actual problem was a file missing from the server. The
+ * three that get confused with each other are worth naming:
+ *
+ *   engine-failed — the reader never loaded. Nothing to do with the photo, and
+ *                   a different photo will not help.
+ *   no-text       — the reader ran and found nothing. The photo is the problem.
+ *   check-failed  — the reader worked and the server did not. Neither is the
+ *                   photo's fault.
+ *
+ * A fourth case is not an error at all and must not look like one: text was
+ * read but no total was found. That goes to the confirm step, where the photo is
+ * shown with an empty amount box, because everything else on the receipt is
+ * still worth keeping.
  */
 const FAILURES: Record<ReceiptFailure, string> = {
   "unsupported-type": "That file is not an image. Choose a photo, or type the expense instead.",
   "too-large": "That image is too large. Try a smaller photo, or type the expense instead.",
-  "engine-failed": "The text reader could not start. Reload the page, or type the expense instead.",
-  "no-text": "No text could be found on that photo. Try again with more light and less angle, or type the expense instead.",
+  "engine-failed":
+    "The text reader could not be loaded, so nothing was read from the photo. This is not a problem with the image. Reload the page, or type the expense instead.",
+  "no-text":
+    "The text reader ran, but found no text on that photo. Try again with more light, less angle and the whole receipt in frame.",
+  "check-failed":
+    "The text was read, but the server could not be reached to check it. Try again in a moment, or type the expense instead.",
   failed: "That receipt could not be read. Try another photo, or type the expense instead.",
 };
 
